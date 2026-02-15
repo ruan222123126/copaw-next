@@ -1,0 +1,337 @@
+openapi: 3.0.3
+info:
+  title: CoPaw Next API
+  version: 0.1.0
+servers:
+  - url: http://127.0.0.1:8088
+paths:
+  /version:
+    get:
+      responses:
+        '200':
+          description: version
+  /healthz:
+    get:
+      responses:
+        '200':
+          description: health
+  /chats:
+    get:
+      parameters:
+        - in: query
+          name: user_id
+          schema: { type: string }
+        - in: query
+          name: channel
+          schema: { type: string }
+      responses:
+        '200': { description: ok }
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChatSpec' }
+      responses:
+        '200': { description: ok }
+  /chats/batch-delete:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { type: string }
+      responses:
+        '200': { description: ok }
+  /chats/{chat_id}:
+    parameters:
+      - in: path
+        name: chat_id
+        required: true
+        schema: { type: string }
+    get:
+      responses:
+        '200': { description: ok }
+    put:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChatSpec' }
+      responses:
+        '200': { description: ok }
+    delete:
+      responses:
+        '200': { description: ok }
+  /agent/process:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgentProcessRequest' }
+      responses:
+        '200': { description: ok }
+  /cron/jobs:
+    get:
+      responses:
+        '200': { description: ok }
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CronJobSpec' }
+      responses:
+        '200': { description: ok }
+  /cron/jobs/{job_id}:
+    parameters:
+      - in: path
+        name: job_id
+        required: true
+        schema: { type: string }
+    get:
+      responses:
+        '200': { description: ok }
+    put:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CronJobSpec' }
+      responses:
+        '200': { description: ok }
+    delete:
+      responses:
+        '200': { description: ok }
+  /cron/jobs/{job_id}/pause:
+    post:
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: ok }
+  /cron/jobs/{job_id}/resume:
+    post:
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: ok }
+  /cron/jobs/{job_id}/run:
+    post:
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: ok }
+  /cron/jobs/{job_id}/state:
+    get:
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: ok }
+  /models:
+    get:
+      responses:
+        '200': { description: ok }
+  /models/{provider_id}/config:
+    put:
+      parameters:
+        - in: path
+          name: provider_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: ok }
+  /models/active:
+    get:
+      responses:
+        '200': { description: ok }
+    put:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModelSlotConfig' }
+      responses:
+        '200': { description: ok }
+  /envs:
+    get:
+      responses:
+        '200': { description: ok }
+    put:
+      responses:
+        '200': { description: ok }
+  /envs/{key}:
+    delete:
+      parameters:
+        - in: path
+          name: key
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: ok }
+  /skills:
+    get:
+      responses:
+        '200': { description: ok }
+    post:
+      responses:
+        '200': { description: ok }
+  /skills/available:
+    get:
+      responses:
+        '200': { description: ok }
+  /skills/batch-disable:
+    post:
+      responses:
+        '200': { description: ok }
+  /skills/batch-enable:
+    post:
+      responses:
+        '200': { description: ok }
+  /skills/{skill_name}/disable:
+    post:
+      parameters:
+        - in: path
+          name: skill_name
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: ok }
+  /skills/{skill_name}/enable:
+    post:
+      parameters:
+        - in: path
+          name: skill_name
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: ok }
+  /skills/{skill_name}:
+    delete:
+      parameters:
+        - in: path
+          name: skill_name
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: ok }
+  /skills/{skill_name}/files/{source}/{file_path}:
+    get:
+      parameters:
+        - in: path
+          name: skill_name
+          required: true
+          schema: { type: string }
+        - in: path
+          name: source
+          required: true
+          schema: { type: string }
+        - in: path
+          name: file_path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: ok }
+  /workspace/download:
+    get:
+      responses:
+        '200': { description: ok }
+  /workspace/upload:
+    post:
+      responses:
+        '200': { description: ok }
+  /config/channels:
+    get:
+      responses:
+        '200': { description: ok }
+    put:
+      responses:
+        '200': { description: ok }
+  /config/channels/types:
+    get:
+      responses:
+        '200': { description: ok }
+  /config/channels/{channel_name}:
+    get:
+      parameters:
+        - in: path
+          name: channel_name
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: ok }
+    put:
+      parameters:
+        - in: path
+          name: channel_name
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    ChatSpec:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        session_id: { type: string }
+        user_id: { type: string }
+        channel: { type: string }
+        created_at: { type: string }
+        updated_at: { type: string }
+        meta: { type: object, additionalProperties: true }
+      required: [session_id, user_id, channel]
+    RuntimeContent:
+      type: object
+      properties:
+        type: { type: string }
+        text: { type: string }
+    AgentInputMessage:
+      type: object
+      properties:
+        role: { type: string }
+        type: { type: string }
+        content:
+          type: array
+          items: { $ref: '#/components/schemas/RuntimeContent' }
+    AgentProcessRequest:
+      type: object
+      properties:
+        input:
+          type: array
+          items: { $ref: '#/components/schemas/AgentInputMessage' }
+        session_id: { type: string }
+        user_id: { type: string }
+        channel: { type: string }
+        stream: { type: boolean }
+      required: [input, session_id, user_id, channel, stream]
+    CronJobSpec:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        enabled: { type: boolean }
+        task_type: { type: string }
+        text: { type: string }
+      required: [id, name]
+    ModelSlotConfig:
+      type: object
+      properties:
+        provider_id: { type: string }
+        model: { type: string }
+      required: [provider_id, model]

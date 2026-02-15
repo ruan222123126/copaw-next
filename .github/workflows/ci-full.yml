@@ -1,0 +1,31 @@
+name: ci-full
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  full:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.23.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+      - name: Install Node deps
+        run: pnpm install --recursive
+      - name: Gateway tests
+        run: cd apps/gateway && go test ./...
+      - name: Build CLI
+        run: cd apps/cli && pnpm build
+      - name: Build web
+        run: cd apps/web && pnpm build
+      - name: Run contract tests
+        run: cd tests/contract && pnpm test

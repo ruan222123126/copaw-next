@@ -1,0 +1,11 @@
+{
+  "name": "@copaw-next/sdk-ts",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node -e \"console.log('sdk build placeholder')\"",
+    "test": "node -e \"console.log('sdk test placeholder')\"",
+    "lint": "node -e \"console.log('sdk lint placeholder')\""
+  }
+}

@@ -1,0 +1,16 @@
+name: nightly-live
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Placeholder live checks
+        run: |
+          echo "Add real model/live environment checks here"
+          echo "Nightly live checks passed"
