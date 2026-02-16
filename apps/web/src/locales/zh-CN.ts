@@ -82,7 +82,6 @@ export const zhCN = {
   "skills.enabledAvailable": "已启用技能（`/skills/available`）",
   "workspace.title": "配置页面",
   "workspace.files": "配置文件列表",
-  "workspace.filesHint": "读取 `GET /workspace/files`，选择后可编辑配置。",
   "workspace.path": "路径",
   "workspace.size": "大小",
   "workspace.action": "操作",

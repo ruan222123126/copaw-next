@@ -240,16 +240,13 @@ const envsJSONInput = mustElement<HTMLTextAreaElement>("envs-json");
 
 const refreshWorkspaceButton = mustElement<HTMLButtonElement>("refresh-workspace");
 const workspaceFilesBody = mustElement<HTMLTableSectionElement>("workspace-files-body");
-const workspaceCreateFileForm = mustElement<HTMLFormElement>("workspace-create-file-form");
-const workspaceNewPathInput = mustElement<HTMLInputElement>("workspace-new-path");
+const workspaceEditorModal = mustElement<HTMLElement>("workspace-editor-modal");
+const workspaceEditorModalCloseButton = mustElement<HTMLButtonElement>("workspace-editor-modal-close-btn");
 const workspaceEditorForm = mustElement<HTMLFormElement>("workspace-editor-form");
 const workspaceFilePathInput = mustElement<HTMLInputElement>("workspace-file-path");
 const workspaceFileContentInput = mustElement<HTMLTextAreaElement>("workspace-file-content");
 const workspaceSaveFileButton = mustElement<HTMLButtonElement>("workspace-save-file-btn");
 const workspaceDeleteFileButton = mustElement<HTMLButtonElement>("workspace-delete-file-btn");
-const workspaceExportButton = mustElement<HTMLButtonElement>("workspace-export-btn");
-const workspaceImportForm = mustElement<HTMLFormElement>("workspace-import-form");
-const workspaceJSONInput = mustElement<HTMLTextAreaElement>("workspace-json");
 
 const refreshCronButton = mustElement<HTMLButtonElement>("refresh-cron");
 const cronJobsBody = mustElement<HTMLTableSectionElement>("cron-jobs-body");
@@ -372,10 +369,16 @@ function bindEvents(): void {
     setSettingsPopoverOpen(false);
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || !isSettingsPopoverOpen()) {
+    if (event.key !== "Escape") {
       return;
     }
-    setSettingsPopoverOpen(false);
+    if (isWorkspaceEditorModalOpen()) {
+      closeWorkspaceEditorModal();
+      return;
+    }
+    if (isSettingsPopoverOpen()) {
+      setSettingsPopoverOpen(false);
+    }
   });
 
   reloadChatsButton.addEventListener("click", async () => {
@@ -552,9 +555,17 @@ function bindEvents(): void {
   refreshWorkspaceButton.addEventListener("click", async () => {
     await refreshWorkspace();
   });
-  workspaceCreateFileForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    await createWorkspaceFile();
+  workspaceEditorModalCloseButton.addEventListener("click", () => {
+    closeWorkspaceEditorModal();
+  });
+  workspaceEditorModal.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    if (target.closest("[data-workspace-modal-close=\"true\"]")) {
+      closeWorkspaceEditorModal();
+    }
   });
   workspaceFilesBody.addEventListener("click", async (event) => {
     const target = event.target;
@@ -569,15 +580,6 @@ function bindEvents(): void {
       }
       return;
     }
-    const deleteButton = target.closest<HTMLButtonElement>("button[data-workspace-delete]");
-    if (!deleteButton) {
-      return;
-    }
-    const path = deleteButton.dataset.workspaceDelete ?? "";
-    if (path === "") {
-      return;
-    }
-    await deleteWorkspaceFile(path);
   });
   workspaceEditorForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -590,13 +592,6 @@ function bindEvents(): void {
       return;
     }
     await deleteWorkspaceFile(path);
-  });
-  workspaceExportButton.addEventListener("click", async () => {
-    await exportWorkspaceJSON();
-  });
-  workspaceImportForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    await importWorkspaceJSON();
   });
 
   refreshCronButton.addEventListener("click", async () => {
@@ -634,6 +629,18 @@ function setSettingsPopoverOpen(open: boolean): void {
   settingsPopover.classList.toggle("is-hidden", !open);
   settingsPopover.setAttribute("aria-hidden", String(!open));
   settingsToggleButton.setAttribute("aria-expanded", String(open));
+}
+
+function isWorkspaceEditorModalOpen(): boolean {
+  return !workspaceEditorModal.classList.contains("is-hidden");
+}
+
+function openWorkspaceEditorModal(): void {
+  workspaceEditorModal.classList.remove("is-hidden");
+}
+
+function closeWorkspaceEditorModal(): void {
+  workspaceEditorModal.classList.add("is-hidden");
 }
 
 function initLocale(): void {
@@ -2064,16 +2071,7 @@ function renderWorkspaceFiles(): void {
     openButton.type = "button";
     openButton.dataset.workspaceOpen = file.path;
     openButton.textContent = t("workspace.openFile");
-    openButton.disabled = file.path === state.activeWorkspacePath;
-
-    const deleteButton = document.createElement("button");
-    deleteButton.type = "button";
-    deleteButton.className = "secondary-btn";
-    deleteButton.dataset.workspaceDelete = file.path;
-    deleteButton.textContent = t("workspace.deleteFile");
-    deleteButton.disabled = file.kind !== "skill";
-
-    actionCol.append(openButton, document.createTextNode(" "), deleteButton);
+    actionCol.appendChild(openButton);
     row.append(pathCol, sizeCol, actionCol);
     workspaceFilesBody.appendChild(row);
   });
@@ -2089,41 +2087,15 @@ function renderWorkspaceEditor(): void {
   workspaceDeleteFileButton.disabled = !canDelete;
 }
 
-async function createWorkspaceFile(): Promise<void> {
-  syncControlState();
-  const path = normalizeWorkspaceInputPath(workspaceNewPathInput.value);
-  if (path === "") {
-    setStatus(t("error.workspacePathRequired"), "error");
-    return;
-  }
-  if (!isWorkspaceSkillPath(path)) {
-    setStatus(t("error.workspaceCreateOnlySkill"), "error");
-    return;
-  }
-
-  try {
-    await putWorkspaceFile(path, createWorkspaceSkillTemplate(path));
-    workspaceNewPathInput.value = "";
-    state.activeWorkspacePath = path;
-    state.activeWorkspaceContent = JSON.stringify(createWorkspaceSkillTemplate(path), null, 2);
-    await refreshWorkspace({ silent: true });
-    setStatus(t("status.workspaceFileCreated", { path }), "info");
-  } catch (error) {
-    setStatus(asWorkspaceErrorMessage(error), "error");
-  }
-}
-
-async function openWorkspaceFile(path: string, options: { silent?: boolean } = {}): Promise<void> {
+async function openWorkspaceFile(path: string): Promise<void> {
   syncControlState();
   try {
     const payload = await getWorkspaceFile(path);
     state.activeWorkspacePath = path;
     state.activeWorkspaceContent = JSON.stringify(payload, null, 2);
-    renderWorkspaceFiles();
     renderWorkspaceEditor();
-    if (!options.silent) {
-      setStatus(t("status.workspaceFileLoaded", { path }), "info");
-    }
+    openWorkspaceEditorModal();
+    setStatus(t("status.workspaceFileLoaded", { path }), "info");
   } catch (error) {
     setStatus(asWorkspaceErrorMessage(error), "error");
   }
@@ -2169,52 +2141,6 @@ async function deleteWorkspaceFile(path: string): Promise<void> {
     }
     await refreshWorkspace({ silent: true });
     setStatus(t("status.workspaceFileDeleted", { path }), "info");
-  } catch (error) {
-    setStatus(asWorkspaceErrorMessage(error), "error");
-  }
-}
-
-async function exportWorkspaceJSON(): Promise<void> {
-  syncControlState();
-  try {
-    const raw = await requestJSON<unknown>("/workspace/export");
-    workspaceJSONInput.value = stringifyWorkspaceExport(raw);
-    setStatus(t("status.workspaceExportReady"), "info");
-  } catch (error) {
-    setStatus(asWorkspaceErrorMessage(error), "error");
-  }
-}
-
-async function importWorkspaceJSON(): Promise<void> {
-  syncControlState();
-  const raw = workspaceJSONInput.value.trim();
-  if (raw === "") {
-    setStatus(t("error.workspaceJSONRequired"), "error");
-    return;
-  }
-
-  let payload: unknown;
-  try {
-    payload = JSON.parse(raw);
-  } catch {
-    setStatus(t("error.workspaceInvalidJSON"), "error");
-    return;
-  }
-
-  try {
-    await requestJSON<unknown>("/workspace/import", {
-      method: "POST",
-      body:
-        payload && typeof payload === "object" && "mode" in (payload as Record<string, unknown>)
-          ? payload
-          : {
-              mode: "replace",
-              payload,
-            },
-    });
-    clearWorkspaceSelection();
-    await refreshWorkspace({ silent: true });
-    setStatus(t("status.workspaceImportDone"), "info");
   } catch (error) {
     setStatus(asWorkspaceErrorMessage(error), "error");
   }
@@ -2310,17 +2236,8 @@ function normalizeWorkspaceFiles(raw: unknown): WorkspaceFileInfo[] {
 function clearWorkspaceSelection(): void {
   state.activeWorkspacePath = "";
   state.activeWorkspaceContent = "";
-}
-
-function stringifyWorkspaceExport(raw: unknown): string {
-  if (typeof raw === "string") {
-    try {
-      return JSON.stringify(JSON.parse(raw), null, 2);
-    } catch {
-      return raw;
-    }
-  }
-  return JSON.stringify(raw ?? {}, null, 2);
+  renderWorkspaceEditor();
+  closeWorkspaceEditorModal();
 }
 
 function normalizeWorkspaceInputPath(path: string): string {
@@ -2333,22 +2250,6 @@ function isWorkspaceSkillPath(path: string): boolean {
   }
   const name = path.slice("skills/".length, path.length - ".json".length).trim();
   return name !== "" && !name.includes("/");
-}
-
-function createWorkspaceSkillTemplate(path: string): Record<string, unknown> {
-  const normalized = normalizeWorkspaceInputPath(path);
-  const name = normalized.slice("skills/".length, normalized.length - ".json".length).trim();
-  if (name === "") {
-    throw new Error(t("error.workspacePathRequired"));
-  }
-  return {
-    name,
-    content: "# new skill",
-    source: "customized",
-    references: {},
-    scripts: {},
-    enabled: true,
-  };
 }
 
 function syncCronDispatchHint(): void {

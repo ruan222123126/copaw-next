@@ -84,7 +84,6 @@ export const enUS: WebMessages = {
   "skills.enabledAvailable": "Enabled Skills (`/skills/available`)",
   "workspace.title": "Configuration",
   "workspace.files": "Config Files",
-  "workspace.filesHint": "Load `GET /workspace/files` and edit selected config file.",
   "workspace.path": "Path",
   "workspace.size": "Size",
   "workspace.action": "Action",

@@ -26,10 +26,10 @@ describe("web shell smoke", () => {
     expect(html).toContain('id="panel-envs"');
     expect(html).toContain('id="panel-workspace"');
     expect(html).toContain('id="workspace-files-body"');
+    expect(html).toContain('id="workspace-editor-modal"');
     expect(html).toContain('id="workspace-editor-form"');
     expect(html).toContain('id="workspace-file-content"');
-    expect(html).toContain('id="workspace-export-btn"');
-    expect(html).toContain('id="workspace-import-form"');
+    expect(html).toContain('id="workspace-editor-modal-close-btn"');
     expect(html).toContain('id="panel-cron"');
   });
 });

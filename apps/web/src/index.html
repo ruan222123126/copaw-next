@@ -193,7 +193,6 @@
           <div class="panel-body stack-block">
             <section class="subpanel">
               <h3 data-i18n="workspace.files">配置文件列表</h3>
-              <p class="hint" data-i18n="workspace.filesHint">读取 `GET /workspace/files`，选择后可编辑配置。</p>
               <div class="table-wrap">
                 <table class="data-table">
                   <thead>
@@ -206,46 +205,6 @@
                   <tbody id="workspace-files-body"></tbody>
                 </table>
               </div>
-              <form id="workspace-create-file-form" class="stack-form">
-                <label>
-                  <span data-i18n="workspace.newPath">新建配置文件路径</span>
-                  <input id="workspace-new-path" type="text" placeholder="notes/demo.md" data-i18n-placeholder="workspace.newPathPlaceholder" />
-                </label>
-                <button id="workspace-create-file-btn" type="submit" data-i18n="workspace.createFile">新建技能配置文件</button>
-              </form>
-            </section>
-
-            <section class="subpanel">
-              <h3 data-i18n="workspace.editor">配置文件编辑</h3>
-              <form id="workspace-editor-form" class="stack-form">
-                <label>
-                  <span data-i18n="workspace.selectedPath">当前配置文件路径</span>
-                  <input id="workspace-file-path" type="text" readonly />
-                </label>
-                <label>
-                  <span data-i18n="workspace.fileContent">配置内容</span>
-                  <textarea id="workspace-file-content" rows="14" placeholder="{}"></textarea>
-                </label>
-                <div class="actions-row">
-                  <button id="workspace-save-file-btn" type="submit" data-i18n="workspace.saveFile">保存到 PUT /workspace/files</button>
-                  <button id="workspace-delete-file-btn" class="secondary-btn" type="button" data-i18n="workspace.deleteFile">删除文件</button>
-                </div>
-              </form>
-            </section>
-
-            <section class="subpanel">
-              <h3 data-i18n="workspace.transfer">配置 JSON 导入导出</h3>
-              <p class="hint" data-i18n="workspace.transferHint">导出 `GET /workspace/export`，导入 `POST /workspace/import` 配置。</p>
-              <div class="actions-row">
-                <button id="workspace-export-btn" type="button" data-i18n="workspace.exportJSON">导出 JSON</button>
-              </div>
-              <form id="workspace-import-form" class="stack-form">
-                <label>
-                  <span data-i18n="workspace.jsonPayload">配置 JSON 内容</span>
-                  <textarea id="workspace-json" rows="12" placeholder='{"docs/readme.md":"hello"}'></textarea>
-                </label>
-                <button id="workspace-import-btn" type="submit" data-i18n="workspace.importJSON">导入 JSON</button>
-              </form>
             </section>
           </div>
         </section>
@@ -390,6 +349,30 @@
             <div class="actions-row">
               <button id="models-provider-cancel-btn" type="button" class="secondary-btn" data-i18n="common.cancel">取消</button>
               <button id="models-provider-save-btn" type="submit" data-i18n="models.saveProvider">保存 Provider</button>
+            </div>
+          </form>
+        </section>
+      </div>
+
+      <div id="workspace-editor-modal" class="modal-shell is-hidden" role="dialog" aria-modal="true" aria-labelledby="workspace-editor-modal-title">
+        <div class="modal-backdrop" data-workspace-modal-close="true"></div>
+        <section class="modal-panel neumorph-panel">
+          <div class="panel-head">
+            <h3 id="workspace-editor-modal-title" data-i18n="workspace.editor">配置文件编辑</h3>
+            <button id="workspace-editor-modal-close-btn" type="button" class="secondary-btn" data-i18n="common.close">关闭</button>
+          </div>
+          <form id="workspace-editor-form" class="stack-form panel-body">
+            <label>
+              <span data-i18n="workspace.selectedPath">当前配置文件路径</span>
+              <input id="workspace-file-path" type="text" readonly />
+            </label>
+            <label>
+              <span data-i18n="workspace.fileContent">配置内容</span>
+              <textarea id="workspace-file-content" rows="14" placeholder="{}"></textarea>
+            </label>
+            <div class="actions-row">
+              <button id="workspace-save-file-btn" type="submit" data-i18n="workspace.saveFile">保存到 PUT /workspace/files</button>
+              <button id="workspace-delete-file-btn" class="secondary-btn" type="button" data-i18n="workspace.deleteFile">删除文件</button>
             </div>
           </form>
         </section>
