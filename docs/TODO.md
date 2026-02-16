@@ -1,6 +1,6 @@
 # CoPaw Next TODO
 
-更新时间：2026-02-16 22:56:11 +0800
+更新时间：2026-02-16 23:09:01 +0800
 
 ## 执行约定（强制）
 - 每位接手 AI 开始前，必须先阅读本文件与 `/home/ruan/.codex/handoff/latest.md`。
@@ -68,8 +68,10 @@
 - [x] 2026-02-16 22:21 +0800 Web 配置页面交互重构：配置页仅保留文件列表，删除“读取 `GET /workspace/files`，选择后可编辑配置。”提示文案；将配置文件编辑迁移至拟态弹框（点击“打开”触发），并移除列表内联删除/创建/导入导出区块；同步更新 smoke 测试断言与中英文 i18n；验证通过 `pnpm -C apps/web test -- --run test/smoke/shell.test.ts` 与 `pnpm -C apps/web build`。
 - [x] 2026-02-16 22:24 +0800 服务重启验证：停止存量 Gateway/Web 进程后重新启动 Gateway（`NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）与 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`。
 - [x] 2026-02-16 22:56 +0800 Gateway 工具扩展与 AI 教程注入落地：新增 `read_file/create_file/update_file` 工具插件与仓库根路径校验、读回截断（64KB）、错误码映射；`/agent/process` 强制加载 `docs/ai-tools.md` 并仅在模型请求前注入 system 消息，文档不可读返回 `ai_tool_guide_unavailable`；同步更新 `packages/contracts/openapi/openapi.yaml`、`docs/contracts.md`、新增 `docs/ai-tools.md`；验证通过 `cd apps/gateway && go test ./...`、`pnpm --filter @copaw-next/tests-contract run lint`、`pnpm --filter @copaw-next/tests-contract run test`。
+- [x] 2026-02-16 23:02 +0800 服务重启验证：再次停止存量 Gateway/Web 后按持久会话启动 Gateway（`NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）与 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`。
+- [x] 2026-02-16 23:09 +0800 AI 文件访问边界规范补充：在 `AGENTS.md` 新增“AI 文件访问边界（本地开发）”，明确允许绝对/相对路径、默认允许根（`/mnt/Files`、`/home/ruan`）、系统目录黑名单、路径穿越与符号链接 realpath 校验；在 `SECURITY.md` 同步补充同等安全边界要求。
 
-## 7. 当前未完成项与阻塞（2026-02-16 22:56:11 +0800）
+## 7. 当前未完成项与阻塞（2026-02-16 23:09:01 +0800）
 - [x] 设计并实现 provider 可删除方案（含内置 provider），并完成 catalog/active/default 语义调整：删除后从 `/models/catalog` 消失；删掉激活 provider 后 `active_llm` 置空。
 - [x] 风险已消除：删除全部 provider 后，`/agent/process` 在 `active_llm` 为空时走内部 demo 回声兜底；并有回归测试覆盖（`apps/gateway/internal/app/server_test.go`）。
 - [ ] 阻塞：无法将 PR 分支远端回退到 `1c94b19`。原因：当前环境策略禁止强推（`git push --force-with-lease` 与 `git push origin +ref` 均被 policy 拦截）；仅普通 `git push` 可执行但因 non-fast-forward 被拒绝。
