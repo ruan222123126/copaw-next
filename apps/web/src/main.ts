@@ -879,6 +879,14 @@ async function sendMessage(): Promise<void> {
     return;
   }
 
+  let bizParams: Record<string, unknown> | undefined;
+  try {
+    bizParams = parseChatBizParams(inputText);
+  } catch (error) {
+    setStatus(asErrorMessage(error), "error");
+    return;
+  }
+
   state.sending = true;
   sendButton.disabled = true;
   const assistantID = `assistant-${Date.now()}`;
@@ -900,7 +908,7 @@ async function sendMessage(): Promise<void> {
   setStatus(t("status.streamingReply"), "info");
 
   try {
-    await streamReply(inputText, (delta) => {
+    await streamReply(inputText, bizParams, (delta) => {
       const target = state.messages.find((item) => item.id === assistantID);
       if (!target) {
         return;
@@ -928,14 +936,21 @@ async function sendMessage(): Promise<void> {
   }
 }
 
-async function streamReply(userText: string, onDelta: (delta: string) => void): Promise<void> {
-  const payload = {
+async function streamReply(
+  userText: string,
+  bizParams: Record<string, unknown> | undefined,
+  onDelta: (delta: string) => void,
+): Promise<void> {
+  const payload: Record<string, unknown> = {
     input: [{ role: "user", type: "message", content: [{ type: "text", text: userText }] }],
     session_id: state.activeSessionId,
     user_id: state.userId,
     channel: state.channel,
     stream: true,
   };
+  if (bizParams && Object.keys(bizParams).length > 0) {
+    payload.biz_params = bizParams;
+  }
 
   const headers = new Headers({
     "content-type": "application/json",
@@ -981,6 +996,25 @@ async function streamReply(userText: string, onDelta: (delta: string) => void): 
   if (!doneReceived) {
     throw new Error(t("error.sseEndedEarly"));
   }
+}
+
+function parseChatBizParams(inputText: string): Record<string, unknown> | undefined {
+  const trimmed = inputText.trim();
+  if (!trimmed.startsWith("/shell")) {
+    return undefined;
+  }
+  const command = trimmed.slice("/shell".length).trim();
+  if (command === "") {
+    throw new Error("shell command is required after /shell");
+  }
+  return {
+    tool: {
+      name: "shell",
+      input: {
+        command,
+      },
+    },
+  };
 }
 
 function consumeSSEBuffer(raw: string, onDelta: (delta: string) => void): { done: boolean; rest: string } {

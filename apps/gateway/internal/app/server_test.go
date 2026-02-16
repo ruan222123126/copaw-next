@@ -190,6 +190,92 @@ func TestProcessAgentDispatchesToWebhookChannel(t *testing.T) {
 	}
 }
 
+func TestProcessAgentRunsShellTool(t *testing.T) {
+	t.Setenv("NEXTAI_ENABLE_SHELL_TOOL", "true")
+	srv := newTestServer(t)
+
+	procReq := `{
+		"input":[{"role":"user","type":"message","content":[{"type":"text","text":"/shell printf hello"}]}],
+		"session_id":"s-shell",
+		"user_id":"u-shell",
+		"channel":"console",
+		"stream":false,
+		"biz_params":{"tool":{"name":"shell","input":{"command":"printf hello"}}}
+	}`
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/agent/process", strings.NewReader(procReq)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("process status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "hello") {
+		t.Fatalf("expected shell output in reply body, got=%s", w.Body.String())
+	}
+}
+
+func TestProcessAgentRejectsUnknownTool(t *testing.T) {
+	srv := newTestServer(t)
+
+	procReq := `{
+		"input":[{"role":"user","type":"message","content":[{"type":"text","text":"run desktop"}]}],
+		"session_id":"s-tool-unknown",
+		"user_id":"u-tool-unknown",
+		"channel":"console",
+		"stream":false,
+		"biz_params":{"tool":{"name":"desktop","input":{}}}
+	}`
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/agent/process", strings.NewReader(procReq)))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"code":"tool_not_supported"`) {
+		t.Fatalf("unexpected body: %s", w.Body.String())
+	}
+}
+
+func TestProcessAgentRejectsShellToolWhenDisabled(t *testing.T) {
+	srv := newTestServer(t)
+
+	procReq := `{
+		"input":[{"role":"user","type":"message","content":[{"type":"text","text":"/shell pwd"}]}],
+		"session_id":"s-shell-disabled",
+		"user_id":"u-shell-disabled",
+		"channel":"console",
+		"stream":false,
+		"biz_params":{"tool":{"name":"shell","input":{"command":"pwd"}}}
+	}`
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/agent/process", strings.NewReader(procReq)))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"code":"tool_disabled"`) {
+		t.Fatalf("unexpected body: %s", w.Body.String())
+	}
+}
+
+func TestProcessAgentRejectsShellToolWithoutCommand(t *testing.T) {
+	t.Setenv("NEXTAI_ENABLE_SHELL_TOOL", "true")
+	srv := newTestServer(t)
+
+	procReq := `{
+		"input":[{"role":"user","type":"message","content":[{"type":"text","text":"/shell"}]}],
+		"session_id":"s-shell-empty",
+		"user_id":"u-shell-empty",
+		"channel":"console",
+		"stream":false,
+		"biz_params":{"tool":{"name":"shell","input":{}}}
+	}`
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/agent/process", strings.NewReader(procReq)))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"code":"invalid_tool_input"`) {
+		t.Fatalf("unexpected body: %s", w.Body.String())
+	}
+}
+
 func TestWorkspaceFilesListIncludesConfigAndSkillFiles(t *testing.T) {
 	srv := newTestServer(t)
 
