@@ -2,7 +2,7 @@ import { parseEnvMap, parseErrorMessage } from "./api-utils.js";
 import { DEFAULT_LOCALE, getLocale, isWebMessageKey, setLocale, t } from "./i18n.js";
 
 type Tone = "neutral" | "info" | "error";
-type TabKey = "chat" | "models" | "envs" | "skills" | "workspace" | "cron";
+type TabKey = "chat" | "models" | "envs" | "workspace" | "cron";
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 type ProviderKVKind = "headers" | "aliases";
 
@@ -106,13 +106,6 @@ interface EnvVar {
   value: string;
 }
 
-interface SkillSpec {
-  name: string;
-  source?: string;
-  enabled: boolean;
-  path?: string;
-}
-
 interface CronScheduleSpec {
   type: string;
   cron: string;
@@ -177,7 +170,7 @@ const DEFAULT_CHANNEL = "console";
 const SETTINGS_KEY = "copaw-next.web.chat.settings";
 const LOCALE_KEY = "copaw-next.web.locale";
 const BUILTIN_PROVIDER_IDS = new Set(["openai"]);
-const TABS: TabKey[] = ["chat", "models", "envs", "skills", "workspace", "cron"];
+const TABS: TabKey[] = ["chat", "models", "envs", "workspace", "cron"];
 
 const apiBaseInput = mustElement<HTMLInputElement>("api-base");
 const apiKeyInput = mustElement<HTMLInputElement>("api-key");
@@ -194,7 +187,6 @@ const tabButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".tab
 const panelChat = mustElement<HTMLElement>("panel-chat");
 const panelModels = mustElement<HTMLElement>("panel-models");
 const panelEnvs = mustElement<HTMLElement>("panel-envs");
-const panelSkills = mustElement<HTMLElement>("panel-skills");
 const panelWorkspace = mustElement<HTMLElement>("panel-workspace");
 const panelCron = mustElement<HTMLElement>("panel-cron");
 
@@ -240,10 +232,6 @@ const envsTableBody = mustElement<HTMLTableSectionElement>("envs-table-body");
 const envsForm = mustElement<HTMLFormElement>("envs-form");
 const envsJSONInput = mustElement<HTMLTextAreaElement>("envs-json");
 
-const refreshSkillsButton = mustElement<HTMLButtonElement>("refresh-skills");
-const skillsAllList = mustElement<HTMLUListElement>("skills-all-list");
-const skillsEnabledList = mustElement<HTMLUListElement>("skills-enabled-list");
-
 const refreshWorkspaceButton = mustElement<HTMLButtonElement>("refresh-workspace");
 const workspaceDownloadLink = mustElement<HTMLAnchorElement>("workspace-download-link");
 const workspaceUploadForm = mustElement<HTMLFormElement>("workspace-upload-form");
@@ -268,7 +256,6 @@ const panelByTab: Record<TabKey, HTMLElement> = {
   chat: panelChat,
   models: panelModels,
   envs: panelEnvs,
-  skills: panelSkills,
   workspace: panelWorkspace,
   cron: panelCron,
 };
@@ -283,7 +270,6 @@ const state = {
     chat: true,
     models: false,
     envs: false,
-    skills: false,
     workspace: false,
     cron: false,
   },
@@ -304,8 +290,6 @@ const state = {
     editingProviderID: "",
   },
   envs: [] as EnvVar[],
-  skillsAll: [] as SkillSpec[],
-  skillsAvailable: [] as SkillSpec[],
   cronJobs: [] as CronJobSpec[],
   cronStates: {} as Record<string, CronJobState>,
 };
@@ -547,26 +531,6 @@ function bindEvents(): void {
     await deleteEnv(key);
   });
 
-  refreshSkillsButton.addEventListener("click", async () => {
-    await refreshSkills();
-  });
-  skillsAllList.addEventListener("click", async (event) => {
-    const target = event.target;
-    if (!(target instanceof Element)) {
-      return;
-    }
-    const button = target.closest<HTMLButtonElement>("button[data-skill-name]");
-    if (!button) {
-      return;
-    }
-    const skillName = button.dataset.skillName ?? "";
-    const action = button.dataset.skillAction;
-    if (skillName === "" || (action !== "enable" && action !== "disable")) {
-      return;
-    }
-    await toggleSkill(skillName, action === "enable");
-  });
-
   refreshWorkspaceButton.addEventListener("click", () => {
     refreshWorkspace();
   });
@@ -660,9 +624,6 @@ function applyLocaleToDocument(): void {
   if (state.tabLoaded.envs) {
     renderEnvsPanel();
   }
-  if (state.tabLoaded.skills) {
-    renderSkillsPanel();
-  }
   if (state.tabLoaded.cron) {
     renderCronJobs();
   }
@@ -729,9 +690,6 @@ async function loadTabData(tab: TabKey, force = false): Promise<void> {
       case "envs":
         await refreshEnvs();
         break;
-      case "skills":
-        await refreshSkills();
-        break;
       case "workspace":
         refreshWorkspace();
         break;
@@ -792,7 +750,6 @@ function syncControlState(): void {
 function invalidateResourceTabs(): void {
   state.tabLoaded.models = false;
   state.tabLoaded.envs = false;
-  state.tabLoaded.skills = false;
   state.tabLoaded.workspace = false;
   state.tabLoaded.cron = false;
 }
@@ -1967,89 +1924,6 @@ async function deleteEnv(key: string): Promise<void> {
   }
 }
 
-async function refreshSkills(): Promise<void> {
-  syncControlState();
-  try {
-    const [allSkills, availableSkills] = await Promise.all([
-      requestJSON<SkillSpec[]>("/skills"),
-      requestJSON<SkillSpec[]>("/skills/available"),
-    ]);
-    state.skillsAll = allSkills;
-    state.skillsAvailable = availableSkills;
-    state.tabLoaded.skills = true;
-    renderSkillsPanel();
-    setStatus(t("status.skillsLoaded", { count: allSkills.length }), "info");
-  } catch (error) {
-    setStatus(asErrorMessage(error), "error");
-  }
-}
-
-function renderSkillsPanel(): void {
-  skillsAllList.innerHTML = "";
-  skillsEnabledList.innerHTML = "";
-
-  if (state.skillsAll.length === 0) {
-    appendEmptyItem(skillsAllList, t("skills.empty"));
-  } else {
-    state.skillsAll.forEach((skill) => {
-      const item = document.createElement("li");
-      item.className = "detail-item";
-
-      const title = document.createElement("p");
-      title.className = "item-title";
-      title.textContent = skill.name;
-
-      const meta = document.createElement("p");
-      meta.className = "item-meta";
-      const source = skill.source ?? t("skills.sourceUnknown");
-      meta.textContent = t("skills.meta", {
-        source,
-        enabled: skill.enabled ? t("common.yes") : t("common.no"),
-      });
-
-      const action = document.createElement("button");
-      action.type = "button";
-      action.className = "secondary-btn";
-      action.dataset.skillName = skill.name;
-      action.dataset.skillAction = skill.enabled ? "disable" : "enable";
-      action.textContent = skill.enabled ? t("skills.disable") : t("skills.enable");
-
-      item.append(title, meta, action);
-      skillsAllList.appendChild(item);
-    });
-  }
-
-  if (state.skillsAvailable.length === 0) {
-    appendEmptyItem(skillsEnabledList, t("skills.enabledEmpty"));
-  } else {
-    state.skillsAvailable.forEach((skill) => {
-      const item = document.createElement("li");
-      item.textContent = skill.name;
-      skillsEnabledList.appendChild(item);
-    });
-  }
-}
-
-async function toggleSkill(name: string, enable: boolean): Promise<void> {
-  syncControlState();
-  const action = enable ? "enable" : "disable";
-  try {
-    await requestJSON<Record<string, boolean>>(`/skills/${encodeURIComponent(name)}/${action}`, {
-      method: "POST",
-    });
-    await refreshSkills();
-    setStatus(
-      t("status.skillToggled", {
-        action: enable ? t("skills.enable") : t("skills.disable"),
-        name,
-      }),
-      "info",
-    );
-  } catch (error) {
-    setStatus(asErrorMessage(error), "error");
-  }
-}
-
 function refreshWorkspace(): void {
   syncControlState();
   setWorkspaceDownloadLink();
@@ -2545,7 +2419,7 @@ function compactTime(value: string): string {
 }
 
 function isTabKey(value: string | undefined): value is TabKey {
-  return value === "chat" || value === "models" || value === "envs" || value === "skills" || value === "workspace" || value === "cron";
+  return value === "chat" || value === "models" || value === "envs" || value === "workspace" || value === "cron";
 }
 
 function newSessionID(): string {

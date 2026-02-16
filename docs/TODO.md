@@ -1,6 +1,6 @@
 # CoPaw Next TODO
 
-更新时间：2026-02-16 20:45:20 +0800
+更新时间：2026-02-16 20:56:43 +0800
 
 ## 执行约定（强制）
 - 每位接手 AI 开始前，必须先阅读本文件与 `/home/ruan/.codex/handoff/latest.md`。
@@ -16,7 +16,7 @@
 ## 2. 核心实现（Gateway / CLI / Web）
 - [x] Gateway 已完成 v1 核心 API、统一错误模型、请求追踪、关键安全防护（如上传路径穿越拦截）、模型 provider/catalog/alias/配置管理等能力。
 - [x] CLI 已完成核心命令集、流式输出、错误分级提示、`--json` 机器输出、多语言与模型配置链路。
-- [x] Web 控制台已完成聊天与关键管理面板（Models/Envs/Skills/Workspace/Cron），并具备统一错误提示与多语言支持。
+- [x] Web 控制台已完成聊天与关键管理面板（Models/Envs/Workspace/Cron），并具备统一错误提示与多语言支持。
 
 ## 3. Contracts（契约）
 - [x] OpenAPI 契约与关键 schema 已补齐，契约 lint、契约测试与 SDK 生成流程已接入并可运行。
@@ -55,8 +55,11 @@
 - [x] 2026-02-16 19:39 +0800 Web 顶栏设置抽屉改造：将 API 地址/API Key/用户 ID/渠道/语言/刷新会话收纳到右上角设置图标弹层，支持点击图标打开、点击空白或按 Esc 关闭；执行 `pnpm -C apps/web test` 与 `pnpm -C apps/web build` 均通过。
 - [x] 2026-02-16 20:43 +0800 PR 分支回退操作：本地分支 `refactor/rename-copaw-to-nextai` 已回退到 `1c94b19`，并创建备份分支 `backup/pr5-before-rollback-20260216-1` 与 `stash@{0}` 保留现场；普通 `git push` 因非 fast-forward 被拒绝，强推命令（`--force-with-lease`/`+refspec`）受当前执行策略拦截，未能同步远端。
 - [x] 2026-02-16 20:45 +0800 工作区安全清理：定位并备份 `apps/gateway/.data/workspace` 为 `apps/gateway/.data/workspace-backup-20260216-204506.tar.gz` 后删除并重建空目录；验证目录存在、权限为 `755`、当前为空。
+- [x] 2026-02-16 20:47 +0800 流程规范更新：`AGENTS.md` 开发流程新增“每次完成任务后必须提交对应 PR，未提交视为未完成；特殊豁免需在 TODO 记录原因”。
+- [x] 2026-02-16 20:47 +0800 服务重启验证：先停止端口占用进程（Gateway `pid=498972`、Web `pid=499049`），再启动 Gateway（`NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）与 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz`、`GET /version`、Web `HEAD /` 均返回 `200`。
+- [x] 2026-02-16 20:56 +0800 Web 技能区移除验证：删除前端 Skills 标签与面板、移除 `main.ts` 中技能状态/请求逻辑并同步 smoke 测试与 README；执行 `pnpm -C apps/web test`（13 tests）与 `pnpm -C apps/web build` 均通过。
 
-## 7. 当前未完成项与阻塞（2026-02-16 20:45:20 +0800）
+## 7. 当前未完成项与阻塞（2026-02-16 20:56:43 +0800）
 - [x] 设计并实现 provider 可删除方案（含内置 provider），并完成 catalog/active/default 语义调整：删除后从 `/models/catalog` 消失；删掉激活 provider 后 `active_llm` 置空。
 - [x] 风险已消除：删除全部 provider 后，`/agent/process` 在 `active_llm` 为空时走内部 demo 回声兜底；并有回归测试覆盖（`apps/gateway/internal/app/server_test.go`）。
 - [ ] 阻塞：无法将 PR 分支远端回退到 `1c94b19`。原因：当前环境策略禁止强推（`git push --force-with-lease` 与 `git push origin +ref` 均被 policy 拦截）；仅普通 `git push` 可执行但因 non-fast-forward 被拒绝。

@@ -10,7 +10,6 @@ describe("web shell smoke", () => {
     expect(html).toContain('data-tab="chat"');
     expect(html).toContain('data-tab="models"');
     expect(html).toContain('data-tab="envs"');
-    expect(html).toContain('data-tab="skills"');
     expect(html).toContain('data-tab="workspace"');
     expect(html).toContain('data-tab="cron"');
 
@@ -25,7 +24,6 @@ describe("web shell smoke", () => {
     expect(html).toContain('id="models-provider-type-select"');
     expect(html).toContain('id="models-provider-name-input"');
     expect(html).toContain('id="panel-envs"');
-    expect(html).toContain('id="panel-skills"');
     expect(html).toContain('id="panel-workspace"');
     expect(html).toContain('id="panel-cron"');
   });

@@ -64,7 +64,6 @@
         <button class="tab-btn active" data-tab="chat" type="button" data-i18n="tab.chat">聊天</button>
         <button class="tab-btn" data-tab="models" type="button" data-i18n="tab.models">模型</button>
         <button class="tab-btn" data-tab="envs" type="button" data-i18n="tab.envs">环境变量</button>
-        <button class="tab-btn" data-tab="skills" type="button" data-i18n="tab.skills">技能</button>
         <button class="tab-btn" data-tab="workspace" type="button" data-i18n="tab.workspace">工作区</button>
         <button class="tab-btn" data-tab="cron" type="button" data-i18n="tab.cron">定时任务</button>
       </nav>
@@ -182,24 +181,6 @@
                 </label>
                 <button type="submit" data-i18n="env.submitPut">提交到 PUT /envs</button>
               </form>
-            </section>
-          </div>
-        </section>
-
-        <section id="panel-skills" class="tab-panel panel stack-panel">
-          <div class="panel-head">
-            <h2 data-i18n="skills.title">技能</h2>
-            <button id="refresh-skills" type="button" data-i18n="common.refresh">刷新</button>
-          </div>
-          <div class="panel-body split-grid">
-            <section class="subpanel">
-              <h3 data-i18n="skills.all">全部技能</h3>
-              <ul id="skills-all-list" class="detail-list"></ul>
-            </section>
-
-            <section class="subpanel">
-              <h3 data-i18n="skills.enabledAvailable">已启用技能（`/skills/available`）</h3>
-              <ul id="skills-enabled-list" class="simple-list"></ul>
             </section>
           </div>
         </section>
