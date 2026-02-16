@@ -171,6 +171,7 @@ interface JSONRequestOptions {
 }
 
 const DEFAULT_API_BASE = "http://127.0.0.1:8088";
+const DEFAULT_API_KEY = "";
 const DEFAULT_USER_ID = "demo-user";
 const DEFAULT_CHANNEL = "console";
 const SETTINGS_KEY = "copaw-next.web.chat.settings";
@@ -179,10 +180,13 @@ const BUILTIN_PROVIDER_IDS = new Set(["openai"]);
 const TABS: TabKey[] = ["chat", "models", "envs", "skills", "workspace", "cron"];
 
 const apiBaseInput = mustElement<HTMLInputElement>("api-base");
+const apiKeyInput = mustElement<HTMLInputElement>("api-key");
 const userIdInput = mustElement<HTMLInputElement>("user-id");
 const channelInput = mustElement<HTMLInputElement>("channel");
 const localeSelect = mustElement<HTMLSelectElement>("locale-select");
 const reloadChatsButton = mustElement<HTMLButtonElement>("reload-chats");
+const settingsToggleButton = mustElement<HTMLButtonElement>("settings-toggle");
+const settingsPopover = mustElement<HTMLElement>("settings-popover");
 const statusLine = mustElement<HTMLElement>("status-line");
 
 const tabButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".tab-btn"));
@@ -271,6 +275,7 @@ const panelByTab: Record<TabKey, HTMLElement> = {
 
 const state = {
   apiBase: DEFAULT_API_BASE,
+  apiKey: DEFAULT_API_KEY,
   userId: DEFAULT_USER_ID,
   channel: DEFAULT_CHANNEL,
   activeTab: "chat" as TabKey,
@@ -311,6 +316,7 @@ async function bootstrap(): Promise<void> {
   initLocale();
   restoreSettings();
   bindEvents();
+  setSettingsPopoverOpen(false);
   applyLocaleToDocument();
   renderTabPanels();
   renderChatHeader();
@@ -320,6 +326,7 @@ async function bootstrap(): Promise<void> {
   syncCronDispatchHint();
   ensureCronSessionID();
   resetProviderModalForm();
+  await syncModelStateOnBoot();
 
   setStatus(t("status.loadingChats"), "info");
   await reloadChats();
@@ -342,6 +349,33 @@ function bindEvents(): void {
     });
   });
 
+  settingsToggleButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setSettingsPopoverOpen(!isSettingsPopoverOpen());
+  });
+  settingsPopover.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+  document.addEventListener("click", (event) => {
+    if (!isSettingsPopoverOpen()) {
+      return;
+    }
+    const target = event.target;
+    if (!(target instanceof Node)) {
+      return;
+    }
+    if (settingsPopover.contains(target) || settingsToggleButton.contains(target)) {
+      return;
+    }
+    setSettingsPopoverOpen(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !isSettingsPopoverOpen()) {
+      return;
+    }
+    setSettingsPopoverOpen(false);
+  });
+
   reloadChatsButton.addEventListener("click", async () => {
     syncControlState();
     setStatus(t("status.refreshingChats"), "info");
@@ -356,6 +390,9 @@ function bindEvents(): void {
   });
 
   apiBaseInput.addEventListener("change", async () => {
+    await handleControlChange(false);
+  });
+  apiKeyInput.addEventListener("change", async () => {
     await handleControlChange(false);
   });
 
@@ -533,9 +570,9 @@ function bindEvents(): void {
   refreshWorkspaceButton.addEventListener("click", () => {
     refreshWorkspace();
   });
-  workspaceDownloadLink.addEventListener("click", () => {
-    syncControlState();
-    setWorkspaceDownloadLink();
+  workspaceDownloadLink.addEventListener("click", async (event) => {
+    event.preventDefault();
+    await downloadWorkspace();
   });
   workspaceUploadForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -567,6 +604,16 @@ function bindEvents(): void {
     }
     await runCronJob(jobID);
   });
+}
+
+function isSettingsPopoverOpen(): boolean {
+  return !settingsPopover.classList.contains("is-hidden");
+}
+
+function setSettingsPopoverOpen(open: boolean): void {
+  settingsPopover.classList.toggle("is-hidden", !open);
+  settingsPopover.setAttribute("aria-hidden", String(!open));
+  settingsToggleButton.setAttribute("aria-expanded", String(open));
 }
 
 function initLocale(): void {
@@ -638,6 +685,14 @@ async function handleControlChange(resetDraft: boolean): Promise<void> {
   }
 }
 
+async function syncModelStateOnBoot(): Promise<void> {
+  try {
+    await syncModelState({ autoActivate: true });
+  } catch {
+    // Keep chat usable even if model catalog is temporarily unavailable.
+  }
+}
+
 async function switchTab(tab: TabKey): Promise<void> {
   if (state.activeTab === tab) {
     return;
@@ -699,6 +754,9 @@ function restoreSettings(): void {
       if (typeof parsed.apiBase === "string" && parsed.apiBase.trim() !== "") {
         state.apiBase = parsed.apiBase.trim();
       }
+      if (typeof parsed.apiKey === "string") {
+        state.apiKey = parsed.apiKey.trim();
+      }
       if (typeof parsed.userId === "string" && parsed.userId.trim() !== "") {
         state.userId = parsed.userId.trim();
       }
@@ -710,18 +768,21 @@ function restoreSettings(): void {
     }
   }
   apiBaseInput.value = state.apiBase;
+  apiKeyInput.value = state.apiKey;
   userIdInput.value = state.userId;
   channelInput.value = state.channel;
 }
 
 function syncControlState(): void {
   state.apiBase = apiBaseInput.value.trim() || DEFAULT_API_BASE;
+  state.apiKey = apiKeyInput.value.trim();
   state.userId = userIdInput.value.trim() || DEFAULT_USER_ID;
   state.channel = channelInput.value.trim() || DEFAULT_CHANNEL;
   localStorage.setItem(
     SETTINGS_KEY,
     JSON.stringify({
       apiBase: state.apiBase,
+      apiKey: state.apiKey,
       userId: state.userId,
       channel: state.channel,
     }),
@@ -860,12 +921,15 @@ async function streamReply(userText: string, onDelta: (delta: string) => void): 
     stream: true,
   };
 
+  const headers = new Headers({
+    "content-type": "application/json",
+    accept: "text/event-stream,application/json",
+  });
+  applyAuthHeaders(headers);
+
   const response = await fetch(toAbsoluteURL("/agent/process"), {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      accept: "text/event-stream,application/json",
-    },
+    headers,
     body: JSON.stringify(payload),
   });
 
@@ -1018,11 +1082,7 @@ function renderMessages(): void {
 async function refreshModels(): Promise<void> {
   syncControlState();
   try {
-    const result = await loadModelCatalog();
-    state.providers = result.providers;
-    state.providerTypes = result.providerTypes;
-    state.modelDefaults = result.defaults;
-    state.activeLLM = result.activeLLM;
+    const result = await syncModelState({ autoActivate: true });
     state.tabLoaded.models = true;
     renderModelsPanel();
     setStatus(
@@ -1034,6 +1094,95 @@ async function refreshModels(): Promise<void> {
   } catch (error) {
     setStatus(asErrorMessage(error), "error");
   }
+}
+
+async function syncModelState(options: { autoActivate: boolean }): Promise<{
+  providers: ProviderInfo[];
+  providerTypes: ProviderTypeInfo[];
+  defaults: Record<string, string>;
+  activeLLM: ModelSlotConfig;
+  source: "catalog" | "legacy";
+}> {
+  const result = await loadModelCatalog();
+  state.providers = result.providers;
+  state.providerTypes = result.providerTypes;
+  state.modelDefaults = result.defaults;
+  state.activeLLM = result.activeLLM;
+
+  if (options.autoActivate) {
+    const autoActivated = await maybeAutoActivateModel(result.providers, result.defaults, result.activeLLM);
+    if (autoActivated) {
+      state.activeLLM = autoActivated;
+      return {
+        ...result,
+        activeLLM: autoActivated,
+      };
+    }
+  }
+
+  return result;
+}
+
+async function maybeAutoActivateModel(
+  providers: ProviderInfo[],
+  defaults: Record<string, string>,
+  activeLLM: ModelSlotConfig,
+): Promise<ModelSlotConfig | null> {
+  if (activeLLM.provider_id !== "" && activeLLM.model !== "") {
+    return null;
+  }
+  const candidate = pickAutoActiveModelCandidate(providers, defaults);
+  if (!candidate) {
+    return null;
+  }
+  try {
+    const out = await requestJSON<ActiveModelsInfo>("/models/active", {
+      method: "PUT",
+      body: {
+        provider_id: candidate.providerID,
+        model: candidate.modelID,
+      },
+    });
+    const normalized = normalizeModelSlot(out.active_llm);
+    if (normalized.provider_id === "" || normalized.model === "") {
+      return null;
+    }
+    return normalized;
+  } catch {
+    return null;
+  }
+}
+
+function pickAutoActiveModelCandidate(
+  providers: ProviderInfo[],
+  defaults: Record<string, string>,
+): { providerID: string; modelID: string } | null {
+  let fallback: { providerID: string; modelID: string } | null = null;
+  for (const provider of providers) {
+    if (provider.enabled === false || provider.has_api_key !== true) {
+      continue;
+    }
+    if (provider.models.length === 0) {
+      continue;
+    }
+    const defaultModel = (defaults[provider.id] ?? "").trim();
+    if (defaultModel !== "" && provider.models.some((model) => model.id === defaultModel)) {
+      return {
+        providerID: provider.id,
+        modelID: defaultModel,
+      };
+    }
+    if (!fallback) {
+      const firstModel = provider.models[0]?.id?.trim() ?? "";
+      if (firstModel !== "") {
+        fallback = {
+          providerID: provider.id,
+          modelID: firstModel,
+        };
+      }
+    }
+  }
+  return fallback;
 }
 
 async function loadModelCatalog(): Promise<{
@@ -1912,6 +2061,38 @@ function setWorkspaceDownloadLink(): void {
   workspaceDownloadLink.href = toAbsoluteURL("/workspace/download");
 }
 
+async function downloadWorkspace(): Promise<void> {
+  syncControlState();
+  setWorkspaceDownloadLink();
+  try {
+    const response = await fetch(
+      toAbsoluteURL("/workspace/download"),
+      buildRequestInit({
+        method: "GET",
+        headers: {
+          accept: "application/zip,application/octet-stream",
+        },
+      }),
+    );
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response));
+    }
+
+    const blob = await response.blob();
+    const downloadURL = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = downloadURL;
+    link.download = "workspace.zip";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(downloadURL);
+    setStatus(t("status.workspaceLinkRefreshed"), "info");
+  } catch (error) {
+    setStatus(asErrorMessage(error), "error");
+  }
+}
+
 async function uploadWorkspace(): Promise<void> {
   syncControlState();
   const file = workspaceUploadFileInput.files?.[0];
@@ -2143,6 +2324,7 @@ function buildRequestInit(options: JSONRequestOptions): RequestInit {
   if (!headers.has("accept-language")) {
     headers.set("accept-language", getLocale());
   }
+  applyAuthHeaders(headers);
 
   let body: BodyInit | undefined;
   if (options.body !== undefined) {
@@ -2159,6 +2341,15 @@ function buildRequestInit(options: JSONRequestOptions): RequestInit {
     headers,
     body,
   };
+}
+
+function applyAuthHeaders(headers: Headers): void {
+  if (headers.has("x-api-key") || headers.has("authorization")) {
+    return;
+  }
+  if (state.apiKey !== "") {
+    headers.set("X-API-Key", state.apiKey);
+  }
 }
 
 async function readErrorMessage(response: Response): Promise<string> {

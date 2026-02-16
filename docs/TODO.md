@@ -1,6 +1,6 @@
 # CoPaw Next TODO
 
-更新时间：2026-02-16 14:51:24 +0800
+更新时间：2026-02-16 19:39:26 +0800
 
 ## 执行约定（强制）
 - 每位接手 AI 开始前，必须先阅读本文件与 `/home/ruan/.codex/handoff/latest.md`。
@@ -48,7 +48,12 @@
 - [x] 2026-02-16 14:46 +0800 Web 模型与会话显示修复验证：Models 面板补回“激活模型”可视化入口（provider/model 下拉 + 手动覆盖 + `PUT /models/active`），并修复会话列表按钮布局为纵向分行；执行 `pnpm -C apps/web test` 与 `pnpm -C apps/web build` 均通过。
 - [x] 2026-02-16 14:49 +0800 服务重启验证：再次重启 Gateway（`make gateway`）与 Web（`python3 -m http.server 5173`）；`/healthz`、`/version` 与 Web `HEAD /` 均返回正常结果。
 - [x] 2026-02-16 14:51 +0800 Web e2e 覆盖补齐：新增 `apps/web/test/e2e/web-active-model-chat-flow.test.ts`，使用 jsdom 真实驱动页面流程（Models 设 active -> Chat 发送消息）并断言助手回复不含 `Echo:`；执行 `pnpm -C apps/web test`（13 tests）与 `pnpm -C apps/web build` 均通过。
+- [x] 2026-02-16 17:39 +0800 服务重启验证：再次重启 Gateway（`make gateway`）与 Web（`python3 -m http.server 5173`）；`/healthz`、`/version` 与 Web `HEAD /` 均返回正常结果。
+- [x] 2026-02-16 17:43 +0800 Web 聊天自动激活模型修复验证：页面启动与模型刷新时若 `active_llm` 为空且存在“启用 + 已配置 API Key + 有模型”的 provider，则自动调用 `PUT /models/active` 设定激活模型，避免聊天误走 `Echo` 兜底；执行 `pnpm -C apps/web test`（13 tests）与 `pnpm -C apps/web build` 均通过。
+- [x] 2026-02-16 18:10 +0800 安全审查复核：逐条复核 8 项网关安全/稳定性风险（鉴权默认放行、SSRF、workspace 资源耗尽、权限位、客户端鉴权头、channels 并发 map、JSON 体积上限、request-id 日志），确认均可由当前代码路径触发；按“体验影响优先”建议主清单保留 1/2/3/5/7，4/6/8 作为次级改进项跟踪。
+- [x] 2026-02-16 19:07 +0800 安全整改落地：完成默认鉴权强制（`COPAW_API_KEY` 默认必填）、provider/webhook SSRF 防护、workspace 上传下载资源上限、JSON body 统一限流、CLI/Web `X-API-Key` 链路、store 权限位收紧、channels 并发 map 加锁、request-id 入日志；验证通过 `go test ./...`（apps/gateway）、`pnpm -C apps/cli test`、`pnpm -C apps/cli build`、`pnpm -C apps/web test`、`pnpm -C apps/web build`。
+- [x] 2026-02-16 19:39 +0800 Web 顶栏设置抽屉改造：将 API 地址/API Key/用户 ID/渠道/语言/刷新会话收纳到右上角设置图标弹层，支持点击图标打开、点击空白或按 Esc 关闭；执行 `pnpm -C apps/web test` 与 `pnpm -C apps/web build` 均通过。
 
-## 7. 当前未完成项与阻塞（2026-02-16 14:51:24 +0800）
+## 7. 当前未完成项与阻塞（2026-02-16 17:43:51 +0800）
 - [x] 设计并实现 provider 可删除方案（含内置 provider），并完成 catalog/active/default 语义调整：删除后从 `/models/catalog` 消失；删掉激活 provider 后 `active_llm` 置空。
 - [x] 风险已消除：删除全部 provider 后，`/agent/process` 在 `active_llm` 为空时走内部 demo 回声兜底；并有回归测试覆盖（`apps/gateway/internal/app/server_test.go`）。

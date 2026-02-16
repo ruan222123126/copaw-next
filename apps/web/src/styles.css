@@ -63,8 +63,8 @@ body {
 .topbar {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 18px;
-  flex-wrap: wrap;
   margin-bottom: 12px;
 }
 
@@ -82,11 +82,49 @@ body {
   font-weight: 700;
 }
 
+.topbar-actions {
+  margin-left: auto;
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.settings-toggle {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  padding: 0;
+  background: rgba(28, 26, 23, 0.92);
+}
+
+.settings-icon {
+  width: 21px;
+  height: 21px;
+}
+
+.settings-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 15;
+  width: min(920px, calc(100vw - 52px));
+  padding: 12px;
+  border-radius: 16px;
+}
+
+.settings-popover.is-hidden {
+  display: none;
+}
+
 .controls {
   display: grid;
   grid-template-columns: repeat(5, minmax(120px, 1fr));
   gap: 10px;
-  min-width: min(760px, 100%);
+  min-width: 0;
+}
+
+.settings-popover .controls > button {
+  align-self: end;
 }
 
 .controls label,
@@ -637,6 +675,10 @@ button:disabled {
 }
 
 @media (max-width: 1020px) {
+  .settings-popover {
+    width: min(640px, calc(100vw - 32px));
+  }
+
   .controls {
     grid-template-columns: repeat(2, minmax(150px, 1fr));
   }
@@ -683,6 +725,18 @@ button:disabled {
 @media (max-width: 680px) {
   .app-shell {
     padding: 14px;
+  }
+
+  .topbar {
+    flex-direction: column;
+  }
+
+  .topbar-actions {
+    width: 100%;
+  }
+
+  .settings-popover {
+    width: min(420px, calc(100vw - 20px));
   }
 
   .controls {
