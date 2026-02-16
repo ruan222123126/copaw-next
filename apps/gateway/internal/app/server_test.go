@@ -281,6 +281,113 @@ func TestProcessAgentOpenAIConfigured(t *testing.T) {
 	}
 }
 
+func TestModelsCatalogIncludesDefaults(t *testing.T) {
+	srv := newTestServer(t)
+
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/models/catalog", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("catalog status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	var out struct {
+		Providers []domain.ProviderInfo  `json:"providers"`
+		Defaults  map[string]string      `json:"defaults"`
+		ActiveLLM domain.ModelSlotConfig `json:"active_llm"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode catalog failed: %v body=%s", err, w.Body.String())
+	}
+	if len(out.Providers) < 2 {
+		t.Fatalf("expected at least 2 providers, got=%d", len(out.Providers))
+	}
+	if out.Defaults["openai"] == "" {
+		t.Fatalf("expected openai default model, got=%v", out.Defaults["openai"])
+	}
+	if out.ActiveLLM.ProviderID == "" || out.ActiveLLM.Model == "" {
+		t.Fatalf("expected active_llm, got=%+v", out.ActiveLLM)
+	}
+}
+
+func TestSetActiveModelsResolvesAlias(t *testing.T) {
+	srv := newTestServer(t)
+
+	configProvider := `{"model_aliases":{"my-fast":"gpt-4o-mini"}}`
+	w1 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w1, httptest.NewRequest(http.MethodPut, "/models/openai/config", strings.NewReader(configProvider)))
+	if w1.Code != http.StatusOK {
+		t.Fatalf("config provider status=%d body=%s", w1.Code, w1.Body.String())
+	}
+
+	setActive := `{"provider_id":"openai","model":"my-fast"}`
+	w2 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w2, httptest.NewRequest(http.MethodPut, "/models/active", strings.NewReader(setActive)))
+	if w2.Code != http.StatusOK {
+		t.Fatalf("set active status=%d body=%s", w2.Code, w2.Body.String())
+	}
+	if !strings.Contains(w2.Body.String(), `"model":"gpt-4o-mini"`) {
+		t.Fatalf("expected resolved alias model, body=%s", w2.Body.String())
+	}
+}
+
+func TestSetActiveModelsRejectsDisabledProvider(t *testing.T) {
+	srv := newTestServer(t)
+
+	configProvider := `{"enabled":false}`
+	w1 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w1, httptest.NewRequest(http.MethodPut, "/models/openai/config", strings.NewReader(configProvider)))
+	if w1.Code != http.StatusOK {
+		t.Fatalf("config provider status=%d body=%s", w1.Code, w1.Body.String())
+	}
+
+	setActive := `{"provider_id":"openai","model":"gpt-4o-mini"}`
+	w2 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w2, httptest.NewRequest(http.MethodPut, "/models/active", strings.NewReader(setActive)))
+	if w2.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got=%d body=%s", w2.Code, w2.Body.String())
+	}
+	if !strings.Contains(w2.Body.String(), `"code":"provider_disabled"`) {
+		t.Fatalf("unexpected body: %s", w2.Body.String())
+	}
+}
+
+func TestProcessAgentCustomProviderOpenAICompatible(t *testing.T) {
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/chat/completions" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"custom provider reply"}}]}`))
+	}))
+	defer mock.Close()
+
+	srv := newTestServer(t)
+
+	configProvider := `{"api_key":"sk-custom","base_url":"` + mock.URL + `","enabled":true}`
+	w1 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w1, httptest.NewRequest(http.MethodPut, "/models/custom-openai/config", strings.NewReader(configProvider)))
+	if w1.Code != http.StatusOK {
+		t.Fatalf("config provider status=%d body=%s", w1.Code, w1.Body.String())
+	}
+
+	setActive := `{"provider_id":"custom-openai","model":"my-model"}`
+	w2 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w2, httptest.NewRequest(http.MethodPut, "/models/active", strings.NewReader(setActive)))
+	if w2.Code != http.StatusOK {
+		t.Fatalf("set active status=%d body=%s", w2.Code, w2.Body.String())
+	}
+
+	procReq := `{"input":[{"role":"user","type":"message","content":[{"type":"text","text":"hello"}]}],"session_id":"s1","user_id":"u1","channel":"console","stream":false}`
+	w3 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w3, httptest.NewRequest(http.MethodPost, "/agent/process", strings.NewReader(procReq)))
+	if w3.Code != http.StatusOK {
+		t.Fatalf("process status=%d body=%s", w3.Code, w3.Body.String())
+	}
+	if !strings.Contains(w3.Body.String(), `"custom provider reply"`) {
+		t.Fatalf("unexpected body: %s", w3.Body.String())
+	}
+}
+
 func TestCronSchedulerRunsIntervalJob(t *testing.T) {
 	srv := newTestServer(t)
 	createReq := `{

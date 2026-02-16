@@ -11,8 +11,12 @@ import (
 )
 
 type ProviderSetting struct {
-	APIKey  string `json:"api_key"`
-	BaseURL string `json:"base_url"`
+	APIKey       string            `json:"api_key"`
+	BaseURL      string            `json:"base_url"`
+	Enabled      *bool             `json:"enabled,omitempty"`
+	Headers      map[string]string `json:"headers,omitempty"`
+	TimeoutMS    int               `json:"timeout_ms,omitempty"`
+	ModelAliases map[string]string `json:"model_aliases,omitempty"`
 }
 
 type State struct {
@@ -60,8 +64,8 @@ func defaultState(dataDir string) State {
 		CronJobs:   map[string]domain.CronJobSpec{},
 		CronStates: map[string]domain.CronJobState{},
 		Providers: map[string]ProviderSetting{
-			"demo":   {APIKey: "", BaseURL: ""},
-			"openai": {APIKey: "", BaseURL: ""},
+			"demo":   defaultProviderSetting(),
+			"openai": defaultProviderSetting(),
 		},
 		ActiveLLM: domain.ModelSlotConfig{ProviderID: "demo", Model: "demo-chat"},
 		Envs:      map[string]string{},
@@ -107,13 +111,28 @@ func (s *Store) load() error {
 		state.CronStates = map[string]domain.CronJobState{}
 	}
 	if state.Providers == nil {
-		state.Providers = map[string]ProviderSetting{"demo": {}}
+		state.Providers = map[string]ProviderSetting{
+			"demo": defaultProviderSetting(),
+		}
 	}
 	if _, ok := state.Providers["demo"]; !ok {
-		state.Providers["demo"] = ProviderSetting{}
+		state.Providers["demo"] = defaultProviderSetting()
 	}
 	if _, ok := state.Providers["openai"]; !ok {
-		state.Providers["openai"] = ProviderSetting{}
+		state.Providers["openai"] = defaultProviderSetting()
+	}
+	for id, setting := range state.Providers {
+		if setting.Enabled == nil {
+			enabled := true
+			setting.Enabled = &enabled
+		}
+		if setting.Headers == nil {
+			setting.Headers = map[string]string{}
+		}
+		if setting.ModelAliases == nil {
+			setting.ModelAliases = map[string]string{}
+		}
+		state.Providers[id] = setting
 	}
 	if state.ActiveLLM.ProviderID == "" {
 		state.ActiveLLM.ProviderID = "demo"
@@ -180,4 +199,13 @@ func (s *Store) Write(fn func(state *State) error) error {
 		return err
 	}
 	return s.saveLocked()
+}
+
+func defaultProviderSetting() ProviderSetting {
+	enabled := true
+	return ProviderSetting{
+		Enabled:      &enabled,
+		Headers:      map[string]string{},
+		ModelAliases: map[string]string{},
+	}
 }

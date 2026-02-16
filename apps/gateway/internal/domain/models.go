@@ -105,8 +105,35 @@ type CronJobView struct {
 }
 
 type ModelInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID           string             `json:"id"`
+	Name         string             `json:"name"`
+	Status       string             `json:"status,omitempty"`
+	AliasOf      string             `json:"alias_of,omitempty"`
+	Capabilities *ModelCapabilities `json:"capabilities,omitempty"`
+	Limit        *ModelLimit        `json:"limit,omitempty"`
+}
+
+type ModelModalities struct {
+	Text  bool `json:"text"`
+	Audio bool `json:"audio"`
+	Image bool `json:"image"`
+	Video bool `json:"video"`
+	PDF   bool `json:"pdf"`
+}
+
+type ModelCapabilities struct {
+	Temperature bool             `json:"temperature"`
+	Reasoning   bool             `json:"reasoning"`
+	Attachment  bool             `json:"attachment"`
+	ToolCall    bool             `json:"tool_call"`
+	Input       *ModelModalities `json:"input,omitempty"`
+	Output      *ModelModalities `json:"output,omitempty"`
+}
+
+type ModelLimit struct {
+	Context int `json:"context,omitempty"`
+	Input   int `json:"input,omitempty"`
+	Output  int `json:"output,omitempty"`
 }
 
 type ProviderInfo struct {
@@ -115,6 +142,7 @@ type ProviderInfo struct {
 	APIKeyPrefix       string      `json:"api_key_prefix"`
 	Models             []ModelInfo `json:"models"`
 	AllowCustomBaseURL bool        `json:"allow_custom_base_url"`
+	Enabled            bool        `json:"enabled"`
 	HasAPIKey          bool        `json:"has_api_key"`
 	CurrentAPIKey      string      `json:"current_api_key"`
 	CurrentBaseURL     string      `json:"current_base_url"`
@@ -127,6 +155,12 @@ type ModelSlotConfig struct {
 
 type ActiveModelsInfo struct {
 	ActiveLLM ModelSlotConfig `json:"active_llm"`
+}
+
+type ModelCatalogInfo struct {
+	Providers []ProviderInfo    `json:"providers"`
+	Defaults  map[string]string `json:"defaults"`
+	ActiveLLM ModelSlotConfig   `json:"active_llm"`
 }
 
 type EnvVar struct {

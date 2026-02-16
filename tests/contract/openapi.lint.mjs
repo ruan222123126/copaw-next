@@ -30,6 +30,11 @@ const cronJobSpec = schemas.CronJobSpec;
 const cronJobState = schemas.CronJobState;
 const cronJobView = schemas.CronJobView;
 const modelSlotConfig = schemas.ModelSlotConfig;
+const activeModelsInfo = schemas.ActiveModelsInfo;
+const modelInfo = schemas.ModelInfo;
+const providerInfo = schemas.ProviderInfo;
+const providerConfigPatch = schemas.ProviderConfigPatch;
+const modelCatalogInfo = schemas.ModelCatalogInfo;
 const apiKeyAuth = spec?.components?.securitySchemes?.ApiKeyAuth;
 
 expect(spec?.openapi === "3.0.3", "openapi 版本必须是 3.0.3");
@@ -88,6 +93,15 @@ expect(modelSlotConfig?.properties?.provider_id?.minLength === 1, "ModelSlotConf
 expect(modelSlotConfig?.properties?.model?.minLength === 1, "ModelSlotConfig.model 必须设置 minLength=1");
 expect(hasRequired(modelSlotConfig, "provider_id"), "ModelSlotConfig.required 必须包含 provider_id");
 expect(hasRequired(modelSlotConfig, "model"), "ModelSlotConfig.required 必须包含 model");
+expect(hasRequired(activeModelsInfo, "active_llm"), "ActiveModelsInfo.required 必须包含 active_llm");
+expect(hasRequired(modelInfo, "id"), "ModelInfo.required 必须包含 id");
+expect(hasRequired(modelInfo, "name"), "ModelInfo.required 必须包含 name");
+expect(providerInfo?.properties?.enabled?.type === "boolean", "ProviderInfo.enabled 必须是 boolean");
+expect(hasRequired(providerInfo, "models"), "ProviderInfo.required 必须包含 models");
+expect(providerConfigPatch?.properties?.timeout_ms?.minimum === 0, "ProviderConfigPatch.timeout_ms 必须设置 minimum=0");
+expect(hasRequired(modelCatalogInfo, "providers"), "ModelCatalogInfo.required 必须包含 providers");
+expect(hasRequired(modelCatalogInfo, "defaults"), "ModelCatalogInfo.required 必须包含 defaults");
+expect(hasRequired(modelCatalogInfo, "active_llm"), "ModelCatalogInfo.required 必须包含 active_llm");
 
 expect(apiKeyAuth?.type === "apiKey", "必须声明 ApiKeyAuth 安全方案");
 expect(apiKeyAuth?.in === "header", "ApiKeyAuth 必须位于 header");

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"copaw-next/apps/gateway/internal/domain"
+	"copaw-next/apps/gateway/internal/provider"
 )
 
 const (
@@ -53,10 +54,19 @@ type GenerateConfig struct {
 	Model      string
 	APIKey     string
 	BaseURL    string
+	AdapterID  string
+	Headers    map[string]string
+	TimeoutMS  int
+}
+
+type ProviderAdapter interface {
+	ID() string
+	GenerateReply(ctx context.Context, req domain.AgentProcessRequest, cfg GenerateConfig, runner *Runner) (string, error)
 }
 
 type Runner struct {
 	httpClient *http.Client
+	adapters   map[string]ProviderAdapter
 }
 
 func New() *Runner {
@@ -67,26 +77,85 @@ func NewWithHTTPClient(client *http.Client) *Runner {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &Runner{httpClient: client}
+	r := &Runner{
+		httpClient: client,
+		adapters:   map[string]ProviderAdapter{},
+	}
+	r.registerAdapter(&demoAdapter{})
+	r.registerAdapter(&openAICompatibleAdapter{})
+	return r
+}
+
+func (r *Runner) registerAdapter(adapter ProviderAdapter) {
+	if adapter == nil {
+		return
+	}
+	id := strings.TrimSpace(adapter.ID())
+	if id == "" {
+		return
+	}
+	r.adapters[id] = adapter
 }
 
 func (r *Runner) GenerateReply(ctx context.Context, req domain.AgentProcessRequest, cfg GenerateConfig) (string, error) {
 	providerID := strings.ToLower(strings.TrimSpace(cfg.ProviderID))
-	if providerID == "" || providerID == ProviderDemo {
-		return generateDemoReply(req), nil
-	}
-	if strings.TrimSpace(cfg.Model) == "" {
-		return "", &RunnerError{Code: ErrorCodeProviderNotConfigured, Message: "model is required for active provider"}
+	if providerID == "" {
+		providerID = ProviderDemo
 	}
 
-	switch providerID {
-	case ProviderOpenAI:
-		return r.generateOpenAIReply(ctx, req, cfg)
-	default:
+	adapterID := strings.TrimSpace(cfg.AdapterID)
+	if adapterID == "" {
+		adapterID = defaultAdapterForProvider(providerID)
+	}
+	if adapterID == "" {
 		return "", &RunnerError{
 			Code:    ErrorCodeProviderNotSupported,
 			Message: fmt.Sprintf("provider %q is not supported", providerID),
 		}
+	}
+
+	if adapterID != provider.AdapterDemo && strings.TrimSpace(cfg.Model) == "" {
+		return "", &RunnerError{Code: ErrorCodeProviderNotConfigured, Message: "model is required for active provider"}
+	}
+
+	adapter, ok := r.adapters[adapterID]
+	if !ok {
+		return "", &RunnerError{
+			Code:    ErrorCodeProviderNotSupported,
+			Message: fmt.Sprintf("adapter %q is not supported", adapterID),
+		}
+	}
+	return adapter.GenerateReply(ctx, req, cfg, r)
+}
+
+type demoAdapter struct{}
+
+func (a *demoAdapter) ID() string {
+	return provider.AdapterDemo
+}
+
+func (a *demoAdapter) GenerateReply(_ context.Context, req domain.AgentProcessRequest, _ GenerateConfig, _ *Runner) (string, error) {
+	return generateDemoReply(req), nil
+}
+
+type openAICompatibleAdapter struct{}
+
+func (a *openAICompatibleAdapter) ID() string {
+	return provider.AdapterOpenAICompatible
+}
+
+func (a *openAICompatibleAdapter) GenerateReply(ctx context.Context, req domain.AgentProcessRequest, cfg GenerateConfig, runner *Runner) (string, error) {
+	return runner.generateOpenAICompatibleReply(ctx, req, cfg)
+}
+
+func defaultAdapterForProvider(providerID string) string {
+	switch providerID {
+	case "", ProviderDemo:
+		return provider.AdapterDemo
+	case ProviderOpenAI:
+		return provider.AdapterOpenAICompatible
+	default:
+		return ""
 	}
 }
 
@@ -108,7 +177,7 @@ func generateDemoReply(req domain.AgentProcessRequest) string {
 	return "Echo: " + strings.Join(parts, " ")
 }
 
-func (r *Runner) generateOpenAIReply(ctx context.Context, req domain.AgentProcessRequest, cfg GenerateConfig) (string, error) {
+func (r *Runner) generateOpenAICompatibleReply(ctx context.Context, req domain.AgentProcessRequest, cfg GenerateConfig) (string, error) {
 	apiKey := strings.TrimSpace(cfg.APIKey)
 	if apiKey == "" {
 		return "", &RunnerError{Code: ErrorCodeProviderNotConfigured, Message: "provider api_key is required"}
@@ -136,7 +205,14 @@ func (r *Runner) generateOpenAIReply(ctx context.Context, req domain.AgentProces
 		}
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(body))
+	requestCtx := ctx
+	cancel := func() {}
+	if cfg.TimeoutMS > 0 {
+		requestCtx, cancel = context.WithTimeout(ctx, time.Duration(cfg.TimeoutMS)*time.Millisecond)
+	}
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", &RunnerError{
 			Code:    ErrorCodeProviderRequestFailed,
@@ -146,6 +222,14 @@ func (r *Runner) generateOpenAIReply(ctx context.Context, req domain.AgentProces
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 	httpReq.Header.Set("Content-Type", "application/json")
+	for key, value := range cfg.Headers {
+		k := strings.TrimSpace(key)
+		v := strings.TrimSpace(value)
+		if k == "" || v == "" {
+			continue
+		}
+		httpReq.Header.Set(k, v)
+	}
 
 	resp, err := r.httpClient.Do(httpReq)
 	if err != nil {

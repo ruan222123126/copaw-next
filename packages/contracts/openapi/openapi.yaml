@@ -187,7 +187,21 @@ paths:
   /models:
     get:
       responses:
-        '200': { description: ok }
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ProviderInfo' }
+  /models/catalog:
+    get:
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelCatalogInfo' }
   /models/{provider_id}/config:
     put:
       parameters:
@@ -195,12 +209,25 @@ paths:
           name: provider_id
           required: true
           schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProviderConfigPatch' }
       responses:
-        '200': { description: ok }
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderInfo' }
   /models/active:
     get:
       responses:
-        '200': { description: ok }
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActiveModelsInfo' }
     put:
       requestBody:
         required: true
@@ -208,7 +235,11 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/ModelSlotConfig' }
       responses:
-        '200': { description: ok }
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActiveModelsInfo' }
   /envs:
     get:
       responses:
@@ -451,3 +482,85 @@ components:
         provider_id: { type: string, minLength: 1 }
         model: { type: string, minLength: 1 }
       required: [provider_id, model]
+    ActiveModelsInfo:
+      type: object
+      properties:
+        active_llm: { $ref: '#/components/schemas/ModelSlotConfig' }
+      required: [active_llm]
+    ModelModalities:
+      type: object
+      properties:
+        text: { type: boolean }
+        audio: { type: boolean }
+        image: { type: boolean }
+        video: { type: boolean }
+        pdf: { type: boolean }
+      required: [text, audio, image, video, pdf]
+    ModelCapabilities:
+      type: object
+      properties:
+        temperature: { type: boolean }
+        reasoning: { type: boolean }
+        attachment: { type: boolean }
+        tool_call: { type: boolean }
+        input: { $ref: '#/components/schemas/ModelModalities' }
+        output: { $ref: '#/components/schemas/ModelModalities' }
+      required: [temperature, reasoning, attachment, tool_call]
+    ModelLimit:
+      type: object
+      properties:
+        context: { type: integer, minimum: 0 }
+        input: { type: integer, minimum: 0 }
+        output: { type: integer, minimum: 0 }
+    ModelInfo:
+      type: object
+      properties:
+        id: { type: string, minLength: 1 }
+        name: { type: string, minLength: 1 }
+        status:
+          type: string
+          enum: [active, alpha, beta, deprecated]
+        alias_of: { type: string }
+        capabilities: { $ref: '#/components/schemas/ModelCapabilities' }
+        limit: { $ref: '#/components/schemas/ModelLimit' }
+      required: [id, name]
+    ProviderInfo:
+      type: object
+      properties:
+        id: { type: string, minLength: 1 }
+        name: { type: string, minLength: 1 }
+        api_key_prefix: { type: string, minLength: 1 }
+        models:
+          type: array
+          items: { $ref: '#/components/schemas/ModelInfo' }
+        allow_custom_base_url: { type: boolean }
+        enabled: { type: boolean }
+        has_api_key: { type: boolean }
+        current_api_key: { type: string }
+        current_base_url: { type: string }
+      required:
+        [id, name, api_key_prefix, models, allow_custom_base_url, enabled, has_api_key, current_api_key, current_base_url]
+    ProviderConfigPatch:
+      type: object
+      properties:
+        api_key: { type: string }
+        base_url: { type: string }
+        enabled: { type: boolean }
+        headers:
+          type: object
+          additionalProperties: { type: string }
+        timeout_ms: { type: integer, minimum: 0 }
+        model_aliases:
+          type: object
+          additionalProperties: { type: string }
+    ModelCatalogInfo:
+      type: object
+      properties:
+        providers:
+          type: array
+          items: { $ref: '#/components/schemas/ProviderInfo' }
+        defaults:
+          type: object
+          additionalProperties: { type: string }
+        active_llm: { $ref: '#/components/schemas/ModelSlotConfig' }
+      required: [providers, defaults, active_llm]

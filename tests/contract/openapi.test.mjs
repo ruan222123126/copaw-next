@@ -13,6 +13,7 @@ const requiredPaths = [
   "/agent/process",
   "/cron/jobs",
   "/models",
+  "/models/catalog",
   "/envs",
   "/skills",
   "/workspace/upload",

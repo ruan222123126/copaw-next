@@ -29,6 +29,7 @@ import (
 	"copaw-next/apps/gateway/internal/domain"
 	"copaw-next/apps/gateway/internal/observability"
 	"copaw-next/apps/gateway/internal/plugin"
+	"copaw-next/apps/gateway/internal/provider"
 	"copaw-next/apps/gateway/internal/repo"
 	"copaw-next/apps/gateway/internal/runner"
 )
@@ -138,6 +139,7 @@ func (s *Server) Handler() http.Handler {
 
 	r.Route("/models", func(r chi.Router) {
 		r.Get("/", s.listProviders)
+		r.Get("/catalog", s.getModelCatalog)
 		r.Put("/{provider_id}/config", s.configureProvider)
 		r.Get("/active", s.getActiveModels)
 		r.Put("/active", s.setActiveModels)
@@ -481,18 +483,32 @@ func (s *Server) processAgent(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		activeLLM = state.ActiveLLM
-		providerSetting = state.Providers[activeLLM.ProviderID]
+		activeLLM.ProviderID = normalizeProviderID(activeLLM.ProviderID)
+		providerSetting = getProviderSettingByID(state, activeLLM.ProviderID)
 		return nil
 	}); err != nil {
 		writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
 		return
 	}
+	if !providerEnabled(providerSetting) {
+		writeErr(w, http.StatusBadRequest, "provider_disabled", "active provider is disabled", nil)
+		return
+	}
+	resolvedModel, ok := provider.ResolveModelID(activeLLM.ProviderID, activeLLM.Model, providerSetting.ModelAliases)
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "model_not_found", "active model is not available for provider", nil)
+		return
+	}
+	activeLLM.Model = resolvedModel
 
 	reply, err := s.runner.GenerateReply(r.Context(), req, runner.GenerateConfig{
 		ProviderID: activeLLM.ProviderID,
 		Model:      activeLLM.Model,
 		APIKey:     resolveProviderAPIKey(activeLLM.ProviderID, providerSetting),
 		BaseURL:    resolveProviderBaseURL(activeLLM.ProviderID, providerSetting),
+		AdapterID:  provider.ResolveAdapter(activeLLM.ProviderID),
+		Headers:    sanitizeStringMap(providerSetting.Headers),
+		TimeoutMS:  providerSetting.TimeoutMS,
 	})
 	if err != nil {
 		status, code, message := mapRunnerError(err)
@@ -1340,53 +1356,71 @@ func cronMisfireExceeded(dueAt *time.Time, runtime domain.CronRuntimeSpec, now t
 }
 
 func (s *Server) listProviders(w http.ResponseWriter, _ *http.Request) {
-	out := make([]domain.ProviderInfo, 0)
-	s.store.Read(func(st *repo.State) {
-		for id, setting := range st.Providers {
-			has := strings.TrimSpace(resolveProviderAPIKey(id, setting)) != ""
-			out = append(out, domain.ProviderInfo{
-				ID: id, Name: strings.ToUpper(id), APIKeyPrefix: strings.ToUpper(id) + "_API_KEY",
-				Models:             providerModels(id),
-				AllowCustomBaseURL: providerAllowCustomBaseURL(id),
-				HasAPIKey:          has,
-				CurrentAPIKey:      maskKey(resolveProviderAPIKey(id, setting)),
-				CurrentBaseURL:     resolveProviderBaseURL(id, setting),
-			})
-		}
+	providers, _, _ := s.collectProviderCatalog()
+	writeJSON(w, http.StatusOK, providers)
+}
+
+func (s *Server) getModelCatalog(w http.ResponseWriter, _ *http.Request) {
+	providers, defaults, active := s.collectProviderCatalog()
+	writeJSON(w, http.StatusOK, domain.ModelCatalogInfo{
+		Providers: providers,
+		Defaults:  defaults,
+		ActiveLLM: active,
 	})
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) configureProvider(w http.ResponseWriter, r *http.Request) {
-	providerID := chi.URLParam(r, "provider_id")
+	providerID := normalizeProviderID(chi.URLParam(r, "provider_id"))
+	if providerID == "" {
+		writeErr(w, http.StatusBadRequest, "invalid_provider_id", "provider_id is required", nil)
+		return
+	}
 	var body struct {
-		APIKey  *string `json:"api_key"`
-		BaseURL *string `json:"base_url"`
+		APIKey       *string            `json:"api_key"`
+		BaseURL      *string            `json:"base_url"`
+		Enabled      *bool              `json:"enabled"`
+		Headers      *map[string]string `json:"headers"`
+		TimeoutMS    *int               `json:"timeout_ms"`
+		ModelAliases *map[string]string `json:"model_aliases"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
 		return
 	}
+	if body.TimeoutMS != nil && *body.TimeoutMS < 0 {
+		writeErr(w, http.StatusBadRequest, "invalid_provider_config", "timeout_ms must be >= 0", nil)
+		return
+	}
+	sanitizedAliases, aliasErr := sanitizeModelAliases(body.ModelAliases)
+	if aliasErr != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_provider_config", aliasErr.Error(), nil)
+		return
+	}
 	var out domain.ProviderInfo
 	if err := s.store.Write(func(st *repo.State) error {
-		setting := st.Providers[providerID]
+		setting := getProviderSettingByID(st, providerID)
+		normalizeProviderSetting(&setting)
 		if body.APIKey != nil {
-			setting.APIKey = *body.APIKey
+			setting.APIKey = strings.TrimSpace(*body.APIKey)
 		}
 		if body.BaseURL != nil {
-			setting.BaseURL = *body.BaseURL
+			setting.BaseURL = strings.TrimSpace(*body.BaseURL)
+		}
+		if body.Enabled != nil {
+			enabled := *body.Enabled
+			setting.Enabled = &enabled
+		}
+		if body.Headers != nil {
+			setting.Headers = sanitizeStringMap(*body.Headers)
+		}
+		if body.TimeoutMS != nil {
+			setting.TimeoutMS = *body.TimeoutMS
+		}
+		if body.ModelAliases != nil {
+			setting.ModelAliases = sanitizedAliases
 		}
 		st.Providers[providerID] = setting
-		has := strings.TrimSpace(resolveProviderAPIKey(providerID, setting)) != ""
-		out = domain.ProviderInfo{
-			ID: providerID, Name: strings.ToUpper(providerID), APIKeyPrefix: strings.ToUpper(providerID) + "_API_KEY",
-			Models:             providerModels(providerID),
-			AllowCustomBaseURL: providerAllowCustomBaseURL(providerID),
-			HasAPIKey:          has,
-			CurrentAPIKey:      maskKey(resolveProviderAPIKey(providerID, setting)),
-			CurrentBaseURL:     resolveProviderBaseURL(providerID, setting),
-		}
+		out = buildProviderInfo(providerID, setting)
 		return nil
 	}); err != nil {
 		writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
@@ -1409,25 +1443,48 @@ func (s *Server) setActiveModels(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
 		return
 	}
+	body.ProviderID = normalizeProviderID(body.ProviderID)
+	body.Model = strings.TrimSpace(body.Model)
 	if body.ProviderID == "" || body.Model == "" {
 		writeErr(w, http.StatusBadRequest, "invalid_model_slot", "provider_id and model are required", nil)
 		return
 	}
+	var out domain.ModelSlotConfig
 	if err := s.store.Write(func(st *repo.State) error {
-		if _, ok := st.Providers[body.ProviderID]; !ok {
+		setting, ok := findProviderSettingByID(st, body.ProviderID)
+		if !ok {
 			return errors.New("provider_not_found")
 		}
-		st.ActiveLLM = body
+		normalizeProviderSetting(&setting)
+		if !providerEnabled(setting) {
+			return errors.New("provider_disabled")
+		}
+		resolvedModel, ok := provider.ResolveModelID(body.ProviderID, body.Model, setting.ModelAliases)
+		if !ok {
+			return errors.New("model_not_found")
+		}
+		out = domain.ModelSlotConfig{
+			ProviderID: body.ProviderID,
+			Model:      resolvedModel,
+		}
+		st.ActiveLLM = out
 		return nil
 	}); err != nil {
-		if err.Error() == "provider_not_found" {
+		switch err.Error() {
+		case "provider_not_found":
 			writeErr(w, http.StatusNotFound, "provider_not_found", "provider not found", nil)
+			return
+		case "provider_disabled":
+			writeErr(w, http.StatusBadRequest, "provider_disabled", "provider is disabled", nil)
+			return
+		case "model_not_found":
+			writeErr(w, http.StatusBadRequest, "model_not_found", "model not found for provider", nil)
 			return
 		}
 		writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, domain.ActiveModelsInfo{ActiveLLM: body})
+	writeJSON(w, http.StatusOK, domain.ActiveModelsInfo{ActiveLLM: out})
 }
 
 func (s *Server) listEnvs(w http.ResponseWriter, _ *http.Request) {
@@ -1878,33 +1935,59 @@ func mapRunnerError(err error) (status int, code string, message string) {
 	return http.StatusInternalServerError, "runner_error", "runner execution failed"
 }
 
-func providerModels(providerID string) []domain.ModelInfo {
-	switch strings.ToLower(strings.TrimSpace(providerID)) {
-	case runner.ProviderOpenAI:
-		return []domain.ModelInfo{
-			{ID: "gpt-4o-mini", Name: "GPT-4o Mini"},
-			{ID: "gpt-4.1-mini", Name: "GPT-4.1 Mini"},
+func (s *Server) collectProviderCatalog() ([]domain.ProviderInfo, map[string]string, domain.ModelSlotConfig) {
+	out := make([]domain.ProviderInfo, 0)
+	defaults := map[string]string{}
+	active := domain.ModelSlotConfig{}
+
+	s.store.Read(func(st *repo.State) {
+		active = st.ActiveLLM
+		ids := map[string]struct{}{}
+		settingsByID := map[string]repo.ProviderSetting{}
+
+		for _, id := range provider.ListBuiltinProviderIDs() {
+			ids[id] = struct{}{}
 		}
-	default:
-		return []domain.ModelInfo{{ID: "demo-chat", Name: "Demo Chat"}}
-	}
+		for rawID, setting := range st.Providers {
+			id := normalizeProviderID(rawID)
+			if id == "" {
+				continue
+			}
+			normalizeProviderSetting(&setting)
+			settingsByID[id] = setting
+			ids[id] = struct{}{}
+		}
+
+		ordered := make([]string, 0, len(ids))
+		for id := range ids {
+			ordered = append(ordered, id)
+		}
+		sort.Strings(ordered)
+
+		for _, id := range ordered {
+			setting := settingsByID[id]
+			normalizeProviderSetting(&setting)
+			out = append(out, buildProviderInfo(id, setting))
+			defaults[id] = provider.DefaultModelID(id)
+		}
+	})
+	return out, defaults, active
 }
 
-func providerAllowCustomBaseURL(providerID string) bool {
-	switch strings.ToLower(strings.TrimSpace(providerID)) {
-	case runner.ProviderDemo:
-		return false
-	default:
-		return true
-	}
-}
-
-func providerDefaultBaseURL(providerID string) string {
-	switch strings.ToLower(strings.TrimSpace(providerID)) {
-	case runner.ProviderOpenAI:
-		return "https://api.openai.com/v1"
-	default:
-		return ""
+func buildProviderInfo(providerID string, setting repo.ProviderSetting) domain.ProviderInfo {
+	normalizeProviderSetting(&setting)
+	spec := provider.ResolveProvider(providerID)
+	apiKey := resolveProviderAPIKey(providerID, setting)
+	return domain.ProviderInfo{
+		ID:                 providerID,
+		Name:               spec.Name,
+		APIKeyPrefix:       spec.APIKeyPrefix,
+		Models:             provider.ResolveModels(providerID, setting.ModelAliases),
+		AllowCustomBaseURL: spec.AllowCustomBaseURL,
+		Enabled:            providerEnabled(setting),
+		HasAPIKey:          strings.TrimSpace(apiKey) != "",
+		CurrentAPIKey:      maskKey(apiKey),
+		CurrentBaseURL:     resolveProviderBaseURL(providerID, setting),
 	}
 }
 
@@ -1922,16 +2005,91 @@ func resolveProviderBaseURL(providerID string, setting repo.ProviderSetting) str
 	if envBaseURL := strings.TrimSpace(os.Getenv(providerEnvPrefix(providerID) + "_BASE_URL")); envBaseURL != "" {
 		return envBaseURL
 	}
-	return providerDefaultBaseURL(providerID)
+	return provider.ResolveProvider(providerID).DefaultBaseURL
 }
 
 func providerEnvPrefix(providerID string) string {
-	prefix := strings.ToUpper(strings.TrimSpace(providerID))
-	if prefix == "" {
-		return "PROVIDER"
+	return provider.EnvPrefix(providerID)
+}
+
+func normalizeProviderID(providerID string) string {
+	return strings.ToLower(strings.TrimSpace(providerID))
+}
+
+func providerEnabled(setting repo.ProviderSetting) bool {
+	if setting.Enabled == nil {
+		return true
 	}
-	replacer := strings.NewReplacer("-", "_", ".", "_", " ", "_")
-	return replacer.Replace(prefix)
+	return *setting.Enabled
+}
+
+func normalizeProviderSetting(setting *repo.ProviderSetting) {
+	if setting == nil {
+		return
+	}
+	if setting.Enabled == nil {
+		enabled := true
+		setting.Enabled = &enabled
+	}
+	if setting.Headers == nil {
+		setting.Headers = map[string]string{}
+	}
+	if setting.ModelAliases == nil {
+		setting.ModelAliases = map[string]string{}
+	}
+}
+
+func sanitizeStringMap(in map[string]string) map[string]string {
+	out := map[string]string{}
+	for key, value := range in {
+		k := strings.TrimSpace(key)
+		v := strings.TrimSpace(value)
+		if k == "" || v == "" {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+func sanitizeModelAliases(raw *map[string]string) (map[string]string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	out := map[string]string{}
+	for key, value := range *raw {
+		alias := strings.TrimSpace(key)
+		modelID := strings.TrimSpace(value)
+		if alias == "" || modelID == "" {
+			return nil, errors.New("model_aliases requires non-empty key and value")
+		}
+		out[alias] = modelID
+	}
+	return out, nil
+}
+
+func getProviderSettingByID(st *repo.State, providerID string) repo.ProviderSetting {
+	if setting, ok := findProviderSettingByID(st, providerID); ok {
+		return setting
+	}
+	setting := repo.ProviderSetting{}
+	normalizeProviderSetting(&setting)
+	return setting
+}
+
+func findProviderSettingByID(st *repo.State, providerID string) (repo.ProviderSetting, bool) {
+	if st == nil {
+		return repo.ProviderSetting{}, false
+	}
+	if setting, ok := st.Providers[providerID]; ok {
+		return setting, true
+	}
+	for key, setting := range st.Providers {
+		if normalizeProviderID(key) == providerID {
+			return setting, true
+		}
+	}
+	return repo.ProviderSetting{}, false
 }
 
 func writeJSON(w http.ResponseWriter, code int, data interface{}) {
