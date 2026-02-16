@@ -64,6 +64,8 @@ interface ModelLimit {
 interface ProviderInfo {
   id: string;
   name: string;
+  display_name: string;
+  openai_compatible?: boolean;
   api_key_prefix?: string;
   models: ModelInfo[];
   allow_custom_base_url?: boolean;
@@ -196,6 +198,16 @@ const modelsActiveForm = mustElement<HTMLFormElement>("models-active-form");
 const modelsProviderSelect = mustElement<HTMLSelectElement>("models-provider-select");
 const modelsModelSelect = mustElement<HTMLSelectElement>("models-model-select");
 const modelsModelInput = mustElement<HTMLInputElement>("models-model-input");
+const modelsConfigForm = mustElement<HTMLFormElement>("models-config-form");
+const modelsProviderIDSelect = mustElement<HTMLSelectElement>("models-provider-id-select");
+const modelsProviderNameInput = mustElement<HTMLInputElement>("models-provider-name-input");
+const modelsProviderAPIKeyInput = mustElement<HTMLInputElement>("models-provider-api-key-input");
+const modelsProviderBaseURLInput = mustElement<HTMLInputElement>("models-provider-base-url-input");
+const modelsProviderTimeoutMSInput = mustElement<HTMLInputElement>("models-provider-timeout-ms-input");
+const modelsProviderEnabledInput = mustElement<HTMLInputElement>("models-provider-enabled-input");
+const modelsProviderHeadersInput = mustElement<HTMLTextAreaElement>("models-provider-headers-input");
+const modelsProviderAliasesInput = mustElement<HTMLTextAreaElement>("models-provider-aliases-input");
+const modelsProviderResetButton = mustElement<HTMLButtonElement>("models-provider-reset-btn");
 
 const refreshEnvsButton = mustElement<HTMLButtonElement>("refresh-envs");
 const envsTableBody = mustElement<HTMLTableSectionElement>("envs-table-body");
@@ -279,6 +291,7 @@ async function bootstrap(): Promise<void> {
   setWorkspaceDownloadLink();
   syncCronDispatchHint();
   ensureCronSessionID();
+  resetProviderForm();
 
   setStatus(t("status.loadingChats"), "info");
   await reloadChats();
@@ -352,6 +365,35 @@ function bindEvents(): void {
   });
   modelsProviderSelect.addEventListener("change", () => {
     renderModelOptionsForProvider(modelsProviderSelect.value, modelsModelSelect.value);
+  });
+  modelsConfigForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await upsertProvider();
+  });
+  modelsProviderIDSelect.addEventListener("change", () => {
+    populateProviderForm(modelsProviderIDSelect.value, true);
+  });
+  modelsProviderResetButton.addEventListener("click", () => {
+    resetProviderForm();
+  });
+  modelsProviderList.addEventListener("click", async (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    const button = target.closest<HTMLButtonElement>("button[data-provider-action]");
+    if (!button) {
+      return;
+    }
+    const providerID = button.dataset.providerId ?? "";
+    if (providerID === "") {
+      return;
+    }
+    const action = button.dataset.providerAction;
+    if (action === "edit") {
+      populateProviderForm(providerID);
+      return;
+    }
   });
 
   refreshEnvsButton.addEventListener("click", async () => {
@@ -942,7 +984,7 @@ function renderModelsPanel(): void {
 
       const title = document.createElement("p");
       title.className = "item-title";
-      title.textContent = provider.id;
+      title.textContent = formatProviderLabel(provider);
 
       const enabledLine = document.createElement("p");
       enabledLine.className = "item-meta";
@@ -975,7 +1017,18 @@ function renderModelsPanel(): void {
       modelLine.className = "item-meta";
       modelLine.textContent = t("models.modelLine", { models: modelText });
 
-      item.append(title, enabledLine, keyStatus, defaultLine, baseURLLine, modelLine);
+      const actions = document.createElement("div");
+      actions.className = "actions-row";
+
+      const editButton = document.createElement("button");
+      editButton.type = "button";
+      editButton.className = "secondary-btn";
+      editButton.dataset.providerAction = "edit";
+      editButton.dataset.providerId = provider.id;
+      editButton.textContent = t("models.editProvider");
+
+      actions.append(editButton);
+      item.append(title, enabledLine, keyStatus, defaultLine, baseURLLine, modelLine, actions);
       modelsProviderList.appendChild(item);
     }
   }
@@ -1001,7 +1054,7 @@ function renderModelsPanel(): void {
     for (const provider of state.providers) {
       const option = document.createElement("option");
       option.value = provider.id;
-      option.textContent = provider.id;
+      option.textContent = formatProviderLabel(provider);
       modelsProviderSelect.appendChild(option);
     }
   }
@@ -1010,6 +1063,30 @@ function renderModelsPanel(): void {
     modelsProviderSelect.value = preferredProvider;
   }
   renderModelOptionsForProvider(modelsProviderSelect.value, preferredModel);
+  renderProviderConfigProviderOptions(modelsProviderIDSelect.value || preferredProvider);
+  populateProviderForm(modelsProviderIDSelect.value, true);
+}
+
+function renderProviderConfigProviderOptions(preferredProviderID = ""): void {
+  const fallbackProviderID = preferredProviderID || state.providers[0]?.id || "";
+  modelsProviderIDSelect.innerHTML = "";
+  if (state.providers.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = t("models.noProviderOption");
+    modelsProviderIDSelect.appendChild(option);
+    modelsProviderIDSelect.value = "";
+    return;
+  }
+  for (const provider of state.providers) {
+    const option = document.createElement("option");
+    option.value = provider.id;
+    option.textContent = formatProviderLabel(provider);
+    modelsProviderIDSelect.appendChild(option);
+  }
+  modelsProviderIDSelect.value = state.providers.some((item) => item.id === fallbackProviderID)
+    ? fallbackProviderID
+    : state.providers[0].id;
 }
 
 function renderModelOptionsForProvider(providerID: string, preferredModel = ""): void {
@@ -1066,6 +1143,140 @@ async function setActiveModel(): Promise<void> {
   } catch (error) {
     setStatus(asErrorMessage(error), "error");
   }
+}
+
+function resetProviderForm(): void {
+  if (state.providers.length > 0) {
+    renderProviderConfigProviderOptions(state.providers[0].id);
+    populateProviderForm(modelsProviderIDSelect.value, true);
+    return;
+  }
+  modelsProviderIDSelect.value = "";
+  modelsProviderNameInput.value = "";
+  modelsProviderAPIKeyInput.value = "";
+  modelsProviderBaseURLInput.value = "";
+  modelsProviderTimeoutMSInput.value = "";
+  modelsProviderEnabledInput.checked = true;
+  modelsProviderHeadersInput.value = "{}";
+  modelsProviderAliasesInput.value = "{}";
+}
+
+function populateProviderForm(providerID: string, silent = false): void {
+  const provider = state.providers.find((item) => item.id === providerID);
+  if (!provider) {
+    if (!silent) {
+      setStatus(t("status.providerNotFound", { providerId: providerID }), "error");
+    }
+    return;
+  }
+  modelsProviderIDSelect.value = provider.id;
+  modelsProviderNameInput.value = provider.display_name ?? provider.name ?? provider.id;
+  modelsProviderAPIKeyInput.value = "";
+  modelsProviderBaseURLInput.value = provider.current_base_url ?? "";
+  modelsProviderEnabledInput.checked = provider.enabled !== false;
+  modelsProviderTimeoutMSInput.value = "";
+  modelsProviderHeadersInput.value = "{}";
+  modelsProviderAliasesInput.value = "{}";
+  if (!silent) {
+    setStatus(t("status.providerLoadedForEdit", { providerId: provider.id }), "info");
+  }
+}
+
+async function upsertProvider(): Promise<void> {
+  syncControlState();
+  const providerID = modelsProviderIDSelect.value.trim();
+  if (providerID === "") {
+    setStatus(t("error.providerIDRequired"), "error");
+    return;
+  }
+
+  let timeoutMS: number | undefined;
+  const timeoutRaw = modelsProviderTimeoutMSInput.value.trim();
+  if (timeoutRaw !== "") {
+    const parsed = Number.parseInt(timeoutRaw, 10);
+    if (Number.isNaN(parsed) || parsed < 0) {
+      setStatus(t("error.providerTimeoutInvalid"), "error");
+      return;
+    }
+    timeoutMS = parsed;
+  }
+
+  let headers: Record<string, string> | undefined;
+  try {
+    headers = parseOptionalStringMap(modelsProviderHeadersInput.value, {
+      invalidJSON: t("error.invalidProviderHeadersJSON"),
+      invalidMap: t("error.invalidProviderHeadersMap"),
+      invalidKey: t("error.invalidProviderHeadersKey"),
+      invalidValue: (key) => t("error.invalidProviderHeadersValue", { key }),
+    });
+  } catch (error) {
+    setStatus(asErrorMessage(error), "error");
+    return;
+  }
+
+  let aliases: Record<string, string> | undefined;
+  try {
+    aliases = parseOptionalStringMap(modelsProviderAliasesInput.value, {
+      invalidJSON: t("error.invalidProviderAliasesJSON"),
+      invalidMap: t("error.invalidProviderAliasesMap"),
+      invalidKey: t("error.invalidProviderAliasesKey"),
+      invalidValue: (key) => t("error.invalidProviderAliasesValue", { key }),
+    });
+  } catch (error) {
+    setStatus(asErrorMessage(error), "error");
+    return;
+  }
+
+  const payload: Record<string, unknown> = {
+    enabled: modelsProviderEnabledInput.checked,
+    display_name: modelsProviderNameInput.value.trim(),
+  };
+  const apiKey = modelsProviderAPIKeyInput.value.trim();
+  if (apiKey !== "") {
+    payload.api_key = apiKey;
+  }
+  const baseURL = modelsProviderBaseURLInput.value.trim();
+  if (baseURL !== "") {
+    payload.base_url = baseURL;
+  }
+  if (typeof timeoutMS === "number") {
+    payload.timeout_ms = timeoutMS;
+  }
+  if (headers) {
+    payload.headers = headers;
+  }
+  if (aliases) {
+    payload.model_aliases = aliases;
+  }
+
+  try {
+    const out = await requestJSON<ProviderInfo>(`/models/${encodeURIComponent(providerID)}/config`, {
+      method: "PUT",
+      body: payload,
+    });
+    await refreshModels();
+    renderProviderConfigProviderOptions(out.id);
+    populateProviderForm(out.id, true);
+    modelsProviderAPIKeyInput.value = "";
+    setStatus(t("status.providerConfigSaved", { providerId: out.id }), "info");
+  } catch (error) {
+    setStatus(asErrorMessage(error), "error");
+  }
+}
+
+function parseOptionalStringMap(
+  raw: string,
+  messages: {
+    invalidJSON: string;
+    invalidMap: string;
+    invalidKey: string;
+    invalidValue: (key: string) => string;
+  },
+): Record<string, string> | undefined {
+  if (raw.trim() === "") {
+    return undefined;
+  }
+  return parseEnvMap(raw, messages);
 }
 
 async function refreshEnvs(): Promise<void> {
@@ -1533,11 +1744,22 @@ function parseIntegerInput(raw: string, fallback: number, min: number): number {
 function normalizeProviders(providers: ProviderInfo[]): ProviderInfo[] {
   return providers.map((provider) => ({
     ...provider,
+    name: provider.name?.trim() || provider.id,
+    display_name: provider.display_name?.trim() || provider.name?.trim() || provider.id,
+    openai_compatible: provider.openai_compatible ?? false,
     models: Array.isArray(provider.models) ? provider.models : [],
     enabled: provider.enabled ?? true,
     current_api_key: provider.current_api_key ?? "",
     current_base_url: provider.current_base_url ?? "",
   }));
+}
+
+function formatProviderLabel(provider: ProviderInfo): string {
+  const base = provider.display_name === provider.id ? provider.id : `${provider.display_name} (${provider.id})`;
+  if (provider.openai_compatible) {
+    return `${base} (${t("models.compatible")})`;
+  }
+  return base;
 }
 
 function normalizeDefaults(defaults: Record<string, string>, providers: ProviderInfo[]): Record<string, string> {

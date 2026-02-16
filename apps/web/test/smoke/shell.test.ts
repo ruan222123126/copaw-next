@@ -16,6 +16,9 @@ describe("web shell smoke", () => {
 
     expect(html).toContain('id="panel-chat"');
     expect(html).toContain('id="panel-models"');
+    expect(html).toContain('id="models-config-form"');
+    expect(html).toContain('id="models-provider-id-select"');
+    expect(html).toContain('id="models-provider-name-input"');
     expect(html).toContain('id="panel-envs"');
     expect(html).toContain('id="panel-skills"');
     expect(html).toContain('id="panel-workspace"');

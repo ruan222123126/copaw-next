@@ -116,6 +116,68 @@
                 <button type="submit" data-i18n="models.setActive">设为激活</button>
               </form>
             </section>
+
+            <section class="subpanel">
+              <h3 data-i18n="models.manageProvider">Provider 配置（编辑）</h3>
+              <form id="models-config-form" class="stack-form">
+                <label>
+                  <span data-i18n="models.providerId">Provider ID</span>
+                  <select id="models-provider-id-select"></select>
+                </label>
+                <label>
+                  <span data-i18n="models.providerName">Provider Name（展示名）</span>
+                  <input
+                    id="models-provider-name-input"
+                    type="text"
+                    placeholder="My OpenAI Gateway"
+                    data-i18n-placeholder="models.providerNamePlaceholder"
+                  />
+                </label>
+                <label>
+                  <span data-i18n="models.providerAPIKey">API Key（可选）</span>
+                  <input id="models-provider-api-key-input" type="password" placeholder="sk-***" data-i18n-placeholder="models.providerAPIKeyPlaceholder" />
+                </label>
+                <label>
+                  <span data-i18n="models.providerBaseURL">Base URL（可选）</span>
+                  <input
+                    id="models-provider-base-url-input"
+                    type="text"
+                    placeholder="http://127.0.0.1:19002/v1"
+                    data-i18n-placeholder="models.providerBaseURLPlaceholder"
+                  />
+                </label>
+                <label>
+                  <span data-i18n="models.providerTimeoutMS">timeout_ms（可选）</span>
+                  <input id="models-provider-timeout-ms-input" type="number" min="0" placeholder="15000" data-i18n-placeholder="models.providerTimeoutPlaceholder" />
+                </label>
+                <label class="checkbox-inline">
+                  <input id="models-provider-enabled-input" type="checkbox" checked />
+                  <span data-i18n="models.providerEnabled">启用 Provider</span>
+                </label>
+                <label>
+                  <span data-i18n="models.providerHeaders">headers（JSON，可选）</span>
+                  <textarea
+                    id="models-provider-headers-input"
+                    rows="4"
+                    placeholder='{"X-Workspace":"lab"}'
+                    data-i18n-placeholder="models.providerHeadersPlaceholder"
+                  ></textarea>
+                </label>
+                <label>
+                  <span data-i18n="models.providerAliases">model_aliases（JSON，可选）</span>
+                  <textarea
+                    id="models-provider-aliases-input"
+                    rows="4"
+                    placeholder='{"fast":"gpt-4o-mini"}'
+                    data-i18n-placeholder="models.providerAliasesPlaceholder"
+                  ></textarea>
+                </label>
+                <div class="actions-row">
+                  <button id="models-provider-reset-btn" type="button" class="secondary-btn" data-i18n="models.resetProvider">重置表单</button>
+                  <button id="models-provider-save-btn" type="submit" data-i18n="models.saveProvider">保存 Provider</button>
+                </div>
+              </form>
+            </section>
           </div>
         </section>
 
