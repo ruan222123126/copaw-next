@@ -186,6 +186,7 @@ export const enUS: WebMessages = {
   "error.workspaceJSONRequired": "Please input JSON payload first",
   "error.workspaceInvalidJSON": "invalid_json: workspace payload must be valid JSON",
   "error.workspaceInvalidFileResponse": "invalid_workspace_file_response: unsupported file response shape",
+  "error.workspaceEndpointMissing": "workspace_endpoint_missing: {{apiBase}} does not expose {{endpoint}}. Point API base to a newer Gateway with workspace file APIs.",
   "error.invalidProviderHeadersJSON": "invalid_provider_headers_json: headers must be valid JSON",
   "error.invalidProviderHeadersMap": "invalid_provider_headers_map: headers must be an object mapping",
   "error.invalidProviderHeadersKey": "invalid_provider_headers_key: headers key cannot be empty",

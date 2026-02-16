@@ -184,6 +184,7 @@ export const zhCN = {
   "error.workspaceJSONRequired": "请先输入 JSON 内容",
   "error.workspaceInvalidJSON": "invalid_json: 工作区 JSON 负载必须是合法 JSON",
   "error.workspaceInvalidFileResponse": "invalid_workspace_file_response: 文件内容响应结构不合法",
+  "error.workspaceEndpointMissing": "workspace_endpoint_missing: {{apiBase}} 未提供 {{endpoint}}，请确认 API 地址指向最新 Gateway（包含工作区文件接口）",
   "error.invalidProviderHeadersJSON": "invalid_provider_headers_json: headers 必须是合法 JSON",
   "error.invalidProviderHeadersMap": "invalid_provider_headers_map: headers 必须是对象映射",
   "error.invalidProviderHeadersKey": "invalid_provider_headers_key: headers 键不能为空",

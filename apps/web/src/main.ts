@@ -1998,7 +1998,7 @@ async function refreshWorkspace(options: { silent?: boolean } = {}): Promise<voi
       setStatus(t("status.workspaceFilesLoaded", { count: files.length }), "info");
     }
   } catch (error) {
-    setStatus(asErrorMessage(error), "error");
+    setStatus(asWorkspaceErrorMessage(error), "error");
   }
 }
 
@@ -2075,7 +2075,7 @@ async function createWorkspaceFile(): Promise<void> {
     await refreshWorkspace({ silent: true });
     setStatus(t("status.workspaceFileCreated", { path }), "info");
   } catch (error) {
-    setStatus(asErrorMessage(error), "error");
+    setStatus(asWorkspaceErrorMessage(error), "error");
   }
 }
 
@@ -2091,7 +2091,7 @@ async function openWorkspaceFile(path: string, options: { silent?: boolean } = {
       setStatus(t("status.workspaceFileLoaded", { path }), "info");
     }
   } catch (error) {
-    setStatus(asErrorMessage(error), "error");
+    setStatus(asWorkspaceErrorMessage(error), "error");
   }
 }
 
@@ -2117,7 +2117,7 @@ async function saveWorkspaceFile(): Promise<void> {
     await refreshWorkspace({ silent: true });
     setStatus(t("status.workspaceFileSaved", { path }), "info");
   } catch (error) {
-    setStatus(asErrorMessage(error), "error");
+    setStatus(asWorkspaceErrorMessage(error), "error");
   }
 }
 
@@ -2136,7 +2136,7 @@ async function deleteWorkspaceFile(path: string): Promise<void> {
     await refreshWorkspace({ silent: true });
     setStatus(t("status.workspaceFileDeleted", { path }), "info");
   } catch (error) {
-    setStatus(asErrorMessage(error), "error");
+    setStatus(asWorkspaceErrorMessage(error), "error");
   }
 }
 
@@ -2147,7 +2147,7 @@ async function exportWorkspaceJSON(): Promise<void> {
     workspaceJSONInput.value = stringifyWorkspaceExport(raw);
     setStatus(t("status.workspaceExportReady"), "info");
   } catch (error) {
-    setStatus(asErrorMessage(error), "error");
+    setStatus(asWorkspaceErrorMessage(error), "error");
   }
 }
 
@@ -2182,7 +2182,7 @@ async function importWorkspaceJSON(): Promise<void> {
     await refreshWorkspace({ silent: true });
     setStatus(t("status.workspaceImportDone"), "info");
   } catch (error) {
-    setStatus(asErrorMessage(error), "error");
+    setStatus(asWorkspaceErrorMessage(error), "error");
   }
 }
 
@@ -2734,6 +2734,20 @@ function asErrorMessage(error: unknown): string {
     return error.message;
   }
   return String(error);
+}
+
+function asWorkspaceErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return asErrorMessage(error);
+  }
+  const raw = error.message.trim().toLowerCase();
+  if (raw === "404 page not found") {
+    return t("error.workspaceEndpointMissing", {
+      endpoint: "/workspace/files",
+      apiBase: state.apiBase,
+    });
+  }
+  return error.message;
 }
 
 function compactTime(value: string): string {
