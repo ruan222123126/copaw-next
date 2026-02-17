@@ -1,6 +1,6 @@
 # NextAI TODO
 
-更新时间：2026-02-17 20:13:19 +0800
+更新时间：2026-02-17 20:59:54 +0800
 
 ## 执行约定（强制）
 - 每位接手 AI 开始前，必须先阅读本文件与 `/home/ruan/.codex/handoff/latest.md`。
@@ -29,6 +29,10 @@
 - [x] `docs/v1-roadmap.md`、`docs/contracts.md`、本地开发文档、部署文档与发布模板已完成。
 
 ## 6. 实操验证（汇总）
+- [x] 2026-02-17 20:59 +0800 再次发布前回归校验：执行 `cd apps/gateway && go test ./...`、`pnpm -r test`、`pnpm -r build` 全部通过（含 web e2e/cli/smoke/contract）。
+- [x] 2026-02-17 20:57 +0800 Windows shell 兼容修复：`apps/gateway/internal/plugin/shell.go` 改为按平台自动选择执行器（Windows 优先 `powershell`，回退 `cmd`；Linux/macOS 使用 `sh`，无 `sh` 回退 `bash`），解决发布包在 Windows 上固定 `sh -lc` 不可用问题。
+- [x] 2026-02-17 20:57 +0800 错误可观测性增强：`mapToolError` 新增 `ErrShellToolExecutorUnavailable` 映射，返回 `502 tool_runtime_unavailable` + 明确文案 `shell executor is unavailable on current host`。
+- [x] 2026-02-17 20:57 +0800 回归与文档同步：新增 `apps/gateway/internal/plugin/shell_test.go` 覆盖 Windows/Unix 执行器选择逻辑；新增 `TestMapToolErrorShellExecutorUnavailable`；更新 `docs/AI/ai-tools.md` 的 shell 跨平台说明；执行 `cd apps/gateway && go test ./internal/plugin ./internal/app` 与 `cd apps/gateway && go test ./...` 均通过。
 - [x] 2026-02-17 20:13 +0800 发布版免 Python 启动落地：Gateway 路由改为 API 鉴权分组 + 可选静态托管，新增 `NEXTAI_WEB_DIR`（默认 `web`）后可直接通过 `http://127.0.0.1:8088/` 访问前端。
 - [x] 2026-02-17 20:13 +0800 Web 托管回归补测：新增 `TestHandlerServesWebStaticFiles` 与 `TestHandlerWebStaticIsPublicWhenAPIKeyEnabled`，覆盖静态资源、SPA 回退与 API Key 下静态页可访问行为。
 - [x] 2026-02-17 20:13 +0800 配置文档同步：更新 `.env.example`、`README.md` 发布版指南与配置说明，移除“必须 python 启动 Web”的描述。

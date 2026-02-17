@@ -6,7 +6,7 @@
 
 - `view`：按行查看指定文件内容。
 - `edit`：按行替换指定文件内容。（使用此工具前先查看文件）
-- `shell`：执行 shell 命令。
+- `shell`：执行 shell 命令（Windows 自动使用 `powershell`/`cmd`，Linux/macOS 使用 `sh`）。
 - `browser`：调用本地 Playwright 浏览器代理执行网页任务（若无须 AI 操作浏览器，可不配置此能力）。
 - `search`：调用内置搜索 API 插件执行联网检索
 

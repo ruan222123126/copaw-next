@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -17,8 +18,9 @@ const (
 )
 
 var (
-	ErrShellToolCommandMissing = errors.New("shell_tool_command_missing")
-	ErrShellToolItemsInvalid   = errors.New("shell_tool_items_invalid")
+	ErrShellToolCommandMissing      = errors.New("shell_tool_command_missing")
+	ErrShellToolItemsInvalid        = errors.New("shell_tool_items_invalid")
+	ErrShellToolExecutorUnavailable = errors.New("shell_tool_executor_unavailable")
 )
 
 type ShellTool struct{}
@@ -75,7 +77,12 @@ func (t *ShellTool) invokeOne(input map[string]interface{}) (map[string]interfac
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-lc", command)
+	program, baseArgs, resolveErr := resolveShellExecutor(runtime.GOOS, exec.LookPath)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+	args := append(append([]string{}, baseArgs...), command)
+	cmd := exec.CommandContext(ctx, program, args...)
 	if cwd := strings.TrimSpace(stringValue(input["cwd"])); cwd != "" {
 		cmd.Dir = cwd
 	}
@@ -192,4 +199,36 @@ func stringValue(v interface{}) string {
 	default:
 		return ""
 	}
+}
+
+func resolveShellExecutor(goos string, lookPath func(file string) (string, error)) (string, []string, error) {
+	if strings.EqualFold(strings.TrimSpace(goos), "windows") {
+		if hasExecutable(lookPath, "powershell", "powershell.exe") {
+			return "powershell", []string{"-NoProfile", "-NonInteractive", "-Command"}, nil
+		}
+		if hasExecutable(lookPath, "cmd", "cmd.exe") {
+			return "cmd", []string{"/C"}, nil
+		}
+		return "", nil, ErrShellToolExecutorUnavailable
+	}
+
+	if hasExecutable(lookPath, "sh") {
+		return "sh", []string{"-lc"}, nil
+	}
+	if hasExecutable(lookPath, "bash") {
+		return "bash", []string{"-lc"}, nil
+	}
+	return "", nil, ErrShellToolExecutorUnavailable
+}
+
+func hasExecutable(lookPath func(file string) (string, error), candidates ...string) bool {
+	for _, name := range candidates {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		if _, err := lookPath(name); err == nil {
+			return true
+		}
+	}
+	return false
 }

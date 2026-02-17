@@ -4102,6 +4102,8 @@ func mapToolError(err error) (status int, code string, message string) {
 				return http.StatusBadRequest, "invalid_tool_input", "tool input command is required"
 			case errors.Is(te.Err, plugin.ErrShellToolItemsInvalid):
 				return http.StatusBadRequest, "invalid_tool_input", "tool input items must be a non-empty array of objects"
+			case errors.Is(te.Err, plugin.ErrShellToolExecutorUnavailable):
+				return http.StatusBadGateway, "tool_runtime_unavailable", "shell executor is unavailable on current host"
 			case errors.Is(te.Err, plugin.ErrFileLinesToolPathMissing):
 				return http.StatusBadRequest, "invalid_tool_input", "tool input path is required"
 			case errors.Is(te.Err, plugin.ErrFileLinesToolPathInvalid):

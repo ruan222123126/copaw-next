@@ -17,6 +17,7 @@ import (
 
 	"nextai/apps/gateway/internal/config"
 	"nextai/apps/gateway/internal/domain"
+	"nextai/apps/gateway/internal/plugin"
 	"nextai/apps/gateway/internal/provider"
 	"nextai/apps/gateway/internal/repo"
 )
@@ -250,6 +251,22 @@ func TestHealthz(t *testing.T) {
 	srv.Handler().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d", w.Code)
+	}
+}
+
+func TestMapToolErrorShellExecutorUnavailable(t *testing.T) {
+	status, code, message := mapToolError(&toolError{
+		Code: "tool_invoke_failed",
+		Err:  plugin.ErrShellToolExecutorUnavailable,
+	})
+	if status != http.StatusBadGateway {
+		t.Fatalf("expected status 502, got=%d", status)
+	}
+	if code != "tool_runtime_unavailable" {
+		t.Fatalf("unexpected code: %q", code)
+	}
+	if message != "shell executor is unavailable on current host" {
+		t.Fatalf("unexpected message: %q", message)
 	}
 }
 
