@@ -10,10 +10,8 @@ Current scope:
   - Providers catalog (`GET /models/catalog`, fallback to `GET /models`)
   - Active model view (`GET /models/active`)
   - Set active model (`PUT /models/active`)
-- Envs tab
-  - Env list (`GET /envs`)
-  - Replace env map by JSON (`PUT /envs`)
-  - Delete single env (`DELETE /envs/{key}`)
+- Channels tab
+  - QQ channel config (`GET/PUT /config/channels/qq`)
 - Config tab
   - File list (`GET /workspace/files`)
   - File read/edit/save/delete (`GET/PUT/DELETE /workspace/files/{file_path}`)
@@ -27,7 +25,7 @@ Notes:
 - One shared status area handles all panel feedback.
 - Error parsing prefers `{ error: { code, message } }`.
 - API Base / User ID / Channel controls are shared by all tabs.
-- Locale supports `zh-CN` and `en-US` via top-bar selector and persists with `localStorage` key `copaw-next.web.locale`.
+- Locale supports `zh-CN` and `en-US` via top-bar selector and persists with `localStorage` key `nextai.web.locale`.
 
 Error handling convention:
 - All non-stream requests go through `requestJSON` in `main.ts`.

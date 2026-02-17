@@ -1,10 +1,12 @@
-import { parseEnvMap, parseErrorMessage } from "./api-utils.js";
+import { parseErrorMessage } from "./api-utils.js";
 import { DEFAULT_LOCALE, getLocale, isWebMessageKey, setLocale, t } from "./i18n.js";
 
 type Tone = "neutral" | "info" | "error";
-type TabKey = "chat" | "models" | "envs" | "workspace" | "cron";
+type TabKey = "chat" | "search" | "models" | "channels" | "workspace" | "cron";
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 type ProviderKVKind = "headers" | "aliases";
+type WorkspaceEditorMode = "json" | "text";
+type CronModalMode = "create" | "edit";
 
 interface ChatSpec {
   id: string;
@@ -13,6 +15,7 @@ interface ChatSpec {
   user_id: string;
   channel: string;
   updated_at: string;
+  meta?: Record<string, unknown>;
 }
 
 interface RuntimeContent {
@@ -102,15 +105,14 @@ interface DeleteResult {
   deleted: boolean;
 }
 
-interface EnvVar {
-  key: string;
-  value: string;
-}
-
 interface WorkspaceFileInfo {
   path: string;
   kind: "config" | "skill";
   size: number | null;
+}
+
+interface WorkspaceTextPayload {
+  content: string;
 }
 
 interface CronScheduleSpec {
@@ -159,6 +161,7 @@ interface CronJobState {
 }
 
 type QQTargetType = "c2c" | "group" | "guild";
+type QQAPIEnvironment = "production" | "sandbox";
 
 interface QQChannelConfig {
   enabled: boolean;
@@ -234,15 +237,23 @@ const DEFAULT_API_BASE = "http://127.0.0.1:8088";
 const DEFAULT_API_KEY = "";
 const DEFAULT_USER_ID = "demo-user";
 const DEFAULT_CHANNEL = "console";
+const WEB_CHAT_CHANNEL = DEFAULT_CHANNEL;
+const QQ_CHANNEL = "qq";
 const DEFAULT_QQ_API_BASE = "https://api.sgroup.qq.com";
+const QQ_SANDBOX_API_BASE = "https://sandbox.api.sgroup.qq.com";
 const DEFAULT_QQ_TOKEN_URL = "https://bots.qq.com/app/getAppAccessToken";
 const DEFAULT_QQ_TIMEOUT_SECONDS = 8;
-const SETTINGS_KEY = "copaw-next.web.chat.settings";
-const LOCALE_KEY = "copaw-next.web.locale";
+const CHAT_LIVE_REFRESH_INTERVAL_MS = 1500;
+const REQUEST_SOURCE_HEADER = "X-NextAI-Source";
+const REQUEST_SOURCE_WEB = "web";
+const SETTINGS_KEY = "nextai.web.chat.settings";
+const LOCALE_KEY = "nextai.web.locale";
 const BUILTIN_PROVIDER_IDS = new Set(["openai"]);
-const TABS: TabKey[] = ["chat", "models", "envs", "workspace", "cron"];
+const TABS: TabKey[] = ["chat", "search", "models", "channels", "workspace", "cron"];
 const customSelectInstances = new Map<HTMLSelectElement, CustomSelectInstance>();
 let customSelectGlobalEventsBound = false;
+let chatLiveRefreshTimer: number | null = null;
+let chatLiveRefreshInFlight = false;
 
 const apiBaseInput = mustElement<HTMLInputElement>("api-base");
 const apiKeyInput = mustElement<HTMLInputElement>("api-key");
@@ -258,8 +269,9 @@ const statusLine = mustElement<HTMLElement>("status-line");
 const tabButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".tab-btn"));
 
 const panelChat = mustElement<HTMLElement>("panel-chat");
+const panelSearch = mustElement<HTMLElement>("panel-search");
 const panelModels = mustElement<HTMLElement>("panel-models");
-const panelEnvs = mustElement<HTMLElement>("panel-envs");
+const panelChannels = mustElement<HTMLElement>("panel-channels");
 const panelWorkspace = mustElement<HTMLElement>("panel-workspace");
 const panelCron = mustElement<HTMLElement>("panel-cron");
 
@@ -267,6 +279,8 @@ const newChatButton = mustElement<HTMLButtonElement>("new-chat");
 const chatList = mustElement<HTMLUListElement>("chat-list");
 const chatTitle = mustElement<HTMLElement>("chat-title");
 const chatSession = mustElement<HTMLElement>("chat-session");
+const searchChatInput = mustElement<HTMLInputElement>("search-chat-input");
+const searchChatResults = mustElement<HTMLUListElement>("search-chat-results");
 const messageList = mustElement<HTMLUListElement>("message-list");
 const composerForm = mustElement<HTMLFormElement>("composer");
 const messageInput = mustElement<HTMLTextAreaElement>("message-input");
@@ -300,11 +314,6 @@ const modelsProviderCustomModelsRows = mustElement<HTMLElement>("models-provider
 const modelsProviderCustomModelsAddButton = mustElement<HTMLButtonElement>("models-provider-custom-models-add-btn");
 const modelsProviderCancelButton = mustElement<HTMLButtonElement>("models-provider-cancel-btn");
 
-const refreshEnvsButton = mustElement<HTMLButtonElement>("refresh-envs");
-const envsTableBody = mustElement<HTMLTableSectionElement>("envs-table-body");
-const envsForm = mustElement<HTMLFormElement>("envs-form");
-const envsJSONInput = mustElement<HTMLTextAreaElement>("envs-json");
-
 const refreshWorkspaceButton = mustElement<HTMLButtonElement>("refresh-workspace");
 const workspaceImportOpenButton = mustElement<HTMLButtonElement>("workspace-import-open-btn");
 const refreshQQChannelButton = mustElement<HTMLButtonElement>("refresh-qq-channel");
@@ -314,9 +323,7 @@ const qqChannelAppIDInput = mustElement<HTMLInputElement>("qq-channel-app-id");
 const qqChannelClientSecretInput = mustElement<HTMLInputElement>("qq-channel-client-secret");
 const qqChannelBotPrefixInput = mustElement<HTMLInputElement>("qq-channel-bot-prefix");
 const qqChannelTargetTypeSelect = mustElement<HTMLSelectElement>("qq-channel-target-type");
-const qqChannelTargetIDInput = mustElement<HTMLInputElement>("qq-channel-target-id");
-const qqChannelAPIBaseInput = mustElement<HTMLInputElement>("qq-channel-api-base");
-const qqChannelTokenURLInput = mustElement<HTMLInputElement>("qq-channel-token-url");
+const qqChannelAPIEnvironmentSelect = mustElement<HTMLSelectElement>("qq-channel-api-env");
 const qqChannelTimeoutSecondsInput = mustElement<HTMLInputElement>("qq-channel-timeout-seconds");
 const workspaceFilesBody = mustElement<HTMLTableSectionElement>("workspace-files-body");
 const workspaceCreateFileForm = mustElement<HTMLFormElement>("workspace-create-file-form");
@@ -337,8 +344,10 @@ const refreshCronButton = mustElement<HTMLButtonElement>("refresh-cron");
 const cronJobsBody = mustElement<HTMLTableSectionElement>("cron-jobs-body");
 const cronCreateOpenButton = mustElement<HTMLButtonElement>("cron-create-open-btn");
 const cronCreateModal = mustElement<HTMLElement>("cron-create-modal");
+const cronCreateModalTitle = mustElement<HTMLElement>("cron-create-modal-title");
 const cronCreateModalCloseButton = mustElement<HTMLButtonElement>("cron-create-modal-close-btn");
 const cronCreateForm = mustElement<HTMLFormElement>("cron-create-form");
+const cronCreateFormTitle = mustElement<HTMLElement>("cron-create-form-title");
 const cronDispatchHint = mustElement<HTMLElement>("cron-dispatch-hint");
 const cronIDInput = mustElement<HTMLInputElement>("cron-id");
 const cronNameInput = mustElement<HTMLInputElement>("cron-name");
@@ -350,11 +359,13 @@ const cronMisfireInput = mustElement<HTMLInputElement>("cron-misfire-grace");
 const cronEnabledInput = mustElement<HTMLInputElement>("cron-enabled");
 const cronTextInput = mustElement<HTMLTextAreaElement>("cron-text");
 const cronNewSessionButton = mustElement<HTMLButtonElement>("cron-new-session");
+const cronSubmitButton = mustElement<HTMLButtonElement>("cron-submit-btn");
 
 const panelByTab: Record<TabKey, HTMLElement> = {
   chat: panelChat,
+  search: panelSearch,
   models: panelModels,
-  envs: panelEnvs,
+  channels: panelChannels,
   workspace: panelWorkspace,
   cron: panelCron,
 };
@@ -367,13 +378,15 @@ const state = {
   activeTab: "chat" as TabKey,
   tabLoaded: {
     chat: true,
+    search: true,
     models: false,
-    envs: false,
+    channels: false,
     workspace: false,
     cron: false,
   },
 
   chats: [] as ChatSpec[],
+  chatSearchQuery: "",
   activeChatId: null as string | null,
   activeSessionId: newSessionID(),
   messages: [] as ViewMessage[],
@@ -389,14 +402,18 @@ const state = {
     mode: "create" as "create" | "edit",
     editingProviderID: "",
   },
-  envs: [] as EnvVar[],
   workspaceFiles: [] as WorkspaceFileInfo[],
   qqChannelConfig: defaultQQChannelConfig(),
   qqChannelAvailable: true,
   activeWorkspacePath: "",
   activeWorkspaceContent: "",
+  activeWorkspaceMode: "json" as WorkspaceEditorMode,
   cronJobs: [] as CronJobSpec[],
   cronStates: {} as Record<string, CronJobState>,
+  cronModal: {
+    mode: "create" as CronModalMode,
+    editingJobID: "",
+  },
 };
 
 const bootstrapTask = bootstrap();
@@ -414,6 +431,7 @@ async function bootstrap(): Promise<void> {
   renderTabPanels();
   renderChatHeader();
   renderChatList();
+  renderSearchChatResults();
   renderMessages();
   renderQQChannelConfig();
   renderWorkspaceFiles();
@@ -422,6 +440,7 @@ async function bootstrap(): Promise<void> {
   ensureCronSessionID();
   resetProviderModalForm();
   await syncModelStateOnBoot();
+  ensureChatLiveRefreshLoop();
 
   setStatus(t("status.loadingChats"), "info");
   await reloadChats();
@@ -432,6 +451,45 @@ async function bootstrap(): Promise<void> {
   }
   startDraftSession();
   setStatus(t("status.noChatsDraft"), "info");
+}
+
+function ensureChatLiveRefreshLoop(): void {
+  if (chatLiveRefreshTimer !== null) {
+    return;
+  }
+  chatLiveRefreshTimer = window.setInterval(() => {
+    void refreshActiveChatLive();
+  }, CHAT_LIVE_REFRESH_INTERVAL_MS);
+}
+
+async function refreshActiveChatLive(): Promise<void> {
+  if (chatLiveRefreshInFlight || state.activeTab !== "chat" || state.activeChatId === null || state.sending) {
+    return;
+  }
+
+  const activeChatID = state.activeChatId;
+  const prevUpdatedAt = state.chats.find((chat) => chat.id === activeChatID)?.updated_at ?? "";
+  chatLiveRefreshInFlight = true;
+  try {
+    await reloadChats();
+    if (state.activeChatId !== activeChatID) {
+      return;
+    }
+    const latest = state.chats.find((chat) => chat.id === activeChatID);
+    if (!latest || latest.updated_at === prevUpdatedAt) {
+      return;
+    }
+    const history = await requestJSON<ChatHistoryResponse>(`/chats/${encodeURIComponent(activeChatID)}`);
+    state.messages = history.messages.map(toViewMessage);
+    renderMessages();
+    renderChatHeader();
+    renderChatList();
+    renderSearchChatResults();
+  } catch {
+    // Keep polling silent to avoid interrupting foreground interactions.
+  } finally {
+    chatLiveRefreshInFlight = false;
+  }
 }
 
 function bindEvents(): void {
@@ -492,6 +550,11 @@ function bindEvents(): void {
     setStatus(t("status.draftReady"), "info");
   });
 
+  searchChatInput.addEventListener("input", () => {
+    state.chatSearchQuery = searchChatInput.value.trim();
+    renderSearchChatResults();
+  });
+
   apiBaseInput.addEventListener("change", async () => {
     await handleControlChange(false);
   });
@@ -500,10 +563,6 @@ function bindEvents(): void {
   });
 
   userIdInput.addEventListener("change", async () => {
-    await handleControlChange(true);
-  });
-
-  channelInput.addEventListener("change", async () => {
     await handleControlChange(true);
   });
   localeSelect.addEventListener("change", () => {
@@ -641,29 +700,6 @@ function bindEvents(): void {
     }
   });
 
-  refreshEnvsButton.addEventListener("click", async () => {
-    await refreshEnvs();
-  });
-  envsForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    await putEnvs();
-  });
-  envsTableBody.addEventListener("click", async (event) => {
-    const target = event.target;
-    if (!(target instanceof Element)) {
-      return;
-    }
-    const button = target.closest<HTMLButtonElement>("button[data-env-key]");
-    if (!button) {
-      return;
-    }
-    const key = button.dataset.envKey ?? "";
-    if (key === "") {
-      return;
-    }
-    await deleteEnv(key);
-  });
-
   refreshWorkspaceButton.addEventListener("click", async () => {
     await refreshWorkspace();
   });
@@ -755,6 +791,7 @@ function bindEvents(): void {
     setWorkspaceImportModalOpen(false);
   });
   cronCreateOpenButton.addEventListener("click", () => {
+    setCronModalMode("create");
     syncCronDispatchHint();
     ensureCronSessionID();
     setCronCreateModalOpen(true);
@@ -785,7 +822,7 @@ function bindEvents(): void {
   });
   cronCreateForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const created = await createCronJob();
+    const created = await saveCronJob();
     if (created) {
       setCronCreateModalOpen(false);
     }
@@ -795,15 +832,27 @@ function bindEvents(): void {
     if (!(target instanceof Element)) {
       return;
     }
-    const button = target.closest<HTMLButtonElement>("button[data-cron-run]");
+    const button = target.closest<HTMLButtonElement>("button[data-cron-run], button[data-cron-edit], button[data-cron-delete]");
     if (!button) {
       return;
     }
-    const jobID = button.dataset.cronRun ?? "";
-    if (jobID === "") {
+    const runJobID = button.dataset.cronRun ?? "";
+    if (runJobID !== "") {
+      await runCronJob(runJobID);
       return;
     }
-    await runCronJob(jobID);
+
+    const editJobID = button.dataset.cronEdit ?? "";
+    if (editJobID !== "") {
+      openCronEditModal(editJobID);
+      return;
+    }
+
+    const deleteJobID = button.dataset.cronDelete ?? "";
+    if (deleteJobID === "") {
+      return;
+    }
+    await deleteCronJob(deleteJobID);
   });
 }
 
@@ -1095,6 +1144,20 @@ function setCronCreateModalOpen(open: boolean): void {
   document.body.classList.toggle("cron-create-open", open);
 }
 
+function setCronModalMode(mode: CronModalMode, editingJobID = ""): void {
+  state.cronModal.mode = mode;
+  state.cronModal.editingJobID = editingJobID;
+
+  const createMode = mode === "create";
+  const titleKey = createMode ? "cron.createTextJob" : "cron.updateTextJob";
+  const submitKey = createMode ? "cron.submitCreate" : "cron.submitUpdate";
+
+  cronCreateModalTitle.textContent = t(titleKey);
+  cronCreateFormTitle.textContent = t(titleKey);
+  cronSubmitButton.textContent = t(submitKey);
+  cronIDInput.readOnly = !createMode;
+}
+
 function initLocale(): void {
   const savedLocale = localStorage.getItem(LOCALE_KEY);
   const locale = setLocale(savedLocale ?? navigator.language ?? DEFAULT_LOCALE);
@@ -1133,21 +1196,22 @@ function applyLocaleToDocument(): void {
   renderProviderTypeOptions();
   renderChatHeader();
   renderChatList();
+  renderSearchChatResults();
   renderMessages();
   if (state.tabLoaded.models) {
     renderModelsPanel();
   }
-  if (state.tabLoaded.envs) {
-    renderEnvsPanel();
+  if (state.tabLoaded.channels) {
+    renderQQChannelConfig();
   }
   if (state.tabLoaded.workspace) {
-    renderQQChannelConfig();
     renderWorkspaceFiles();
     renderWorkspaceEditor();
   }
   if (state.tabLoaded.cron) {
     renderCronJobs();
   }
+  setCronModalMode(state.cronModal.mode, state.cronModal.editingJobID);
   syncCronDispatchHint();
   syncAllCustomSelects();
 }
@@ -1204,7 +1268,8 @@ function renderTabPanels(): void {
 
 async function loadTabData(tab: TabKey, force = false): Promise<void> {
   try {
-    if (tab === "chat") {
+    if (tab === "chat" || tab === "search") {
+      await reloadChats();
       return;
     }
     if (!force && state.tabLoaded[tab]) {
@@ -1215,8 +1280,8 @@ async function loadTabData(tab: TabKey, force = false): Promise<void> {
       case "models":
         await refreshModels();
         break;
-      case "envs":
-        await refreshEnvs();
+      case "channels":
+        await refreshQQChannelConfig();
         break;
       case "workspace":
         await refreshWorkspace();
@@ -1246,54 +1311,85 @@ function restoreSettings(): void {
       if (typeof parsed.userId === "string" && parsed.userId.trim() !== "") {
         state.userId = parsed.userId.trim();
       }
-      if (typeof parsed.channel === "string" && parsed.channel.trim() !== "") {
-        state.channel = parsed.channel.trim();
-      }
     } catch {
       localStorage.removeItem(SETTINGS_KEY);
     }
   }
+  state.channel = WEB_CHAT_CHANNEL;
   apiBaseInput.value = state.apiBase;
   apiKeyInput.value = state.apiKey;
   userIdInput.value = state.userId;
-  channelInput.value = state.channel;
+  channelInput.value = WEB_CHAT_CHANNEL;
+  channelInput.readOnly = true;
 }
 
 function syncControlState(): void {
   state.apiBase = apiBaseInput.value.trim() || DEFAULT_API_BASE;
   state.apiKey = apiKeyInput.value.trim();
   state.userId = userIdInput.value.trim() || DEFAULT_USER_ID;
-  state.channel = channelInput.value.trim() || DEFAULT_CHANNEL;
+  state.channel = WEB_CHAT_CHANNEL;
+  channelInput.value = WEB_CHAT_CHANNEL;
   localStorage.setItem(
     SETTINGS_KEY,
     JSON.stringify({
       apiBase: state.apiBase,
       apiKey: state.apiKey,
       userId: state.userId,
-      channel: state.channel,
     }),
   );
 }
 
 function invalidateResourceTabs(): void {
   state.tabLoaded.models = false;
-  state.tabLoaded.envs = false;
+  state.tabLoaded.channels = false;
   state.tabLoaded.workspace = false;
   state.tabLoaded.cron = false;
 }
 
-async function reloadChats(): Promise<void> {
+async function reloadChats(options: { includeQQHistory?: boolean } = {}): Promise<void> {
   try {
+    const includeQQHistory = options.includeQQHistory ?? true;
     const query = new URLSearchParams({
+      channel: WEB_CHAT_CHANNEL,
       user_id: state.userId,
-      channel: state.channel,
     });
-    const chats = await requestJSON<ChatSpec[]>(`/chats?${query.toString()}`);
-    state.chats = chats;
+    const chatsRequests: Array<Promise<ChatSpec[]>> = [requestJSON<ChatSpec[]>(`/chats?${query.toString()}`)];
+    if (includeQQHistory) {
+      const qqQuery = new URLSearchParams({ channel: QQ_CHANNEL });
+      chatsRequests.push(requestJSON<ChatSpec[]>(`/chats?${qqQuery.toString()}`));
+    }
+    const chatsGroups = await Promise.all(chatsRequests);
+    const chatsByID = new Map<string, ChatSpec>();
+    chatsGroups.flat().forEach((chat) => {
+      chatsByID.set(chat.id, chat);
+    });
+    const nextChats = Array.from(chatsByID.values());
+    nextChats.sort((a, b) => {
+      const ta = Date.parse(a.updated_at);
+      const tb = Date.parse(b.updated_at);
+      const va = Number.isFinite(ta) ? ta : 0;
+      const vb = Number.isFinite(tb) ? tb : 0;
+      if (vb !== va) {
+        return vb - va;
+      }
+      return a.id.localeCompare(b.id);
+    });
+    const prevDigest = state.chats.map((chat) => `${chat.id}:${chat.updated_at}`).join("|");
+    const nextDigest = nextChats.map((chat) => `${chat.id}:${chat.updated_at}`).join("|");
+    const chatsChanged = prevDigest !== nextDigest;
+    state.chats = nextChats;
+
+    let activeChatCleared = false;
     if (state.activeChatId && !state.chats.some((chat) => chat.id === state.activeChatId)) {
       state.activeChatId = null;
+      activeChatCleared = true;
+    }
+
+    if (!chatsChanged && !activeChatCleared) {
+      return;
     }
     renderChatList();
+    renderSearchChatResults();
     renderChatHeader();
   } catch (error) {
     setStatus(asErrorMessage(error), "error");
@@ -1311,6 +1407,7 @@ async function openChat(chatID: string): Promise<void> {
   state.activeSessionId = chat.session_id;
   renderChatHeader();
   renderChatList();
+  renderSearchChatResults();
 
   try {
     const history = await requestJSON<ChatHistoryResponse>(`/chats/${encodeURIComponent(chat.id)}`);
@@ -1322,12 +1419,57 @@ async function openChat(chatID: string): Promise<void> {
   }
 }
 
+async function deleteChat(chatID: string): Promise<void> {
+  const chat = state.chats.find((item) => item.id === chatID);
+  if (!chat) {
+    setStatus(t("status.chatNotFound", { chatId: chatID }), "error");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    t("chat.deleteConfirm", {
+      sessionId: chat.session_id,
+    }),
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  const wasActive = state.activeChatId === chatID;
+  try {
+    await requestJSON<DeleteResult>(`/chats/${encodeURIComponent(chatID)}`, {
+      method: "DELETE",
+    });
+    await reloadChats();
+    if (wasActive) {
+      if (state.chats.length > 0) {
+        await openChat(state.chats[0].id);
+      } else {
+        startDraftSession();
+      }
+    } else {
+      renderChatList();
+      renderSearchChatResults();
+      renderChatHeader();
+    }
+    setStatus(
+      t("status.chatDeleted", {
+        sessionId: chat.session_id,
+      }),
+      "info",
+    );
+  } catch (error) {
+    setStatus(asErrorMessage(error), "error");
+  }
+}
+
 function startDraftSession(): void {
   state.activeChatId = null;
   state.activeSessionId = newSessionID();
   state.messages = [];
   renderChatHeader();
   renderChatList();
+  renderSearchChatResults();
   renderMessages();
 }
 
@@ -1344,7 +1486,7 @@ async function sendMessage(): Promise<void> {
     return;
   }
 
-  if (state.apiBase === "" || state.userId === "" || state.channel === "") {
+  if (state.apiBase === "" || state.userId === "") {
     setStatus(t("status.controlsRequired"), "error");
     return;
   }
@@ -1414,14 +1556,15 @@ async function sendMessage(): Promise<void> {
     const matched = state.chats.find(
       (chat) =>
         chat.session_id === state.activeSessionId &&
-        chat.user_id === state.userId &&
-        chat.channel === state.channel,
+        chat.channel === WEB_CHAT_CHANNEL &&
+        chat.user_id === state.userId,
     );
     if (matched) {
       state.activeChatId = matched.id;
       state.activeSessionId = matched.session_id;
       renderChatHeader();
       renderChatList();
+      renderSearchChatResults();
     }
   } catch (error) {
     setStatus(asErrorMessage(error), "error");
@@ -1441,7 +1584,7 @@ async function streamReply(
     input: [{ role: "user", type: "message", content: [{ type: "text", text: userText }] }],
     session_id: state.activeSessionId,
     user_id: state.userId,
-    channel: state.channel,
+    channel: WEB_CHAT_CHANNEL,
     stream: true,
   };
   if (bizParams && Object.keys(bizParams).length > 0) {
@@ -1453,6 +1596,7 @@ async function streamReply(
     accept: "text/event-stream,application/json",
   });
   applyAuthHeaders(headers);
+  applyRequestSourceHeader(headers);
 
   const response = await fetch(toAbsoluteURL("/agent/process"), {
     method: "POST",
@@ -1595,6 +1739,9 @@ function renderChatList(): void {
     li.className = "chat-list-item";
     li.style.animationDelay = `${Math.min(index * 24, 180)}ms`;
 
+    const actions = document.createElement("div");
+    actions.className = "chat-item-actions";
+
     const button = document.createElement("button");
     button.type = "button";
     button.className = "chat-item-btn";
@@ -1617,9 +1764,101 @@ function renderChatList(): void {
     });
 
     button.append(title, meta);
-    li.appendChild(button);
+    actions.appendChild(button);
+
+    const deleteLabel = t("chat.delete");
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "chat-delete-btn";
+    deleteButton.setAttribute("aria-label", deleteLabel);
+    deleteButton.title = deleteLabel;
+    deleteButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M7 21q-.825 0-1.412-.587T5 19V6H4V4h5V3h6v1h5v2h-1v13q0 .825-.587 1.413T17 21zM17 6H7v13h10zM9 17h2V8H9zm4 0h2V8h-2zM7 6v13z"/></svg>`;
+    deleteButton.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      await deleteChat(chat.id);
+    });
+    actions.appendChild(deleteButton);
+
+    li.appendChild(actions);
     chatList.appendChild(li);
   });
+}
+
+function renderSearchChatResults(): void {
+  searchChatResults.innerHTML = "";
+  searchChatInput.value = state.chatSearchQuery;
+
+  if (state.chats.length === 0) {
+    appendEmptyItem(searchChatResults, t("search.emptyChats"));
+    return;
+  }
+
+  const filteredChats = filterChatsForSearch(state.chatSearchQuery);
+  if (filteredChats.length === 0) {
+    appendEmptyItem(
+      searchChatResults,
+      t("search.noResults", {
+        query: state.chatSearchQuery,
+      }),
+    );
+    return;
+  }
+
+  filteredChats.forEach((chat) => {
+    const li = document.createElement("li");
+    li.className = "search-result-item";
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chat-item-btn search-result-btn";
+    if (chat.id === state.activeChatId) {
+      button.classList.add("active");
+    }
+    button.addEventListener("click", async () => {
+      await openChat(chat.id);
+      await switchTab("chat");
+    });
+
+    const title = document.createElement("span");
+    title.className = "chat-title";
+    title.textContent = chat.name || t("chat.unnamed");
+
+    const meta = document.createElement("span");
+    meta.className = "chat-meta";
+    meta.textContent = t("search.meta", {
+      sessionId: chat.session_id,
+      channel: chat.channel,
+      userId: chat.user_id,
+      updatedAt: compactTime(chat.updated_at),
+    });
+
+    button.append(title, meta);
+    li.appendChild(button);
+    searchChatResults.appendChild(li);
+  });
+}
+
+function filterChatsForSearch(query: string): ChatSpec[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (normalizedQuery === "") {
+    return state.chats;
+  }
+  return state.chats.filter((chat) => buildChatSearchText(chat).includes(normalizedQuery));
+}
+
+function buildChatSearchText(chat: ChatSpec): string {
+  return [chat.name, chat.session_id, chat.id, chat.user_id, chat.channel, stringifyChatMeta(chat.meta)].join(" ").toLowerCase();
+}
+
+function stringifyChatMeta(meta: Record<string, unknown> | undefined): string {
+  if (!meta) {
+    return "";
+  }
+  try {
+    return JSON.stringify(meta);
+  } catch {
+    return "";
+  }
 }
 
 function renderChatHeader(): void {
@@ -2298,6 +2537,50 @@ function normalizeProviderTypeValue(value: string): string {
   return normalized;
 }
 
+function normalizeProviderIDValue(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function slugifyProviderID(value: string): string {
+  return normalizeProviderIDValue(value)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function ensureUniqueProviderID(baseProviderID: string): string {
+  const base = normalizeProviderIDValue(baseProviderID);
+  if (base === "") {
+    return "";
+  }
+  const existing = new Set(
+    state.providers
+      .map((provider) => normalizeProviderIDValue(provider.id))
+      .filter((providerID) => providerID !== ""),
+  );
+  if (!existing.has(base)) {
+    return base;
+  }
+  let suffix = 2;
+  while (existing.has(`${base}-${suffix}`)) {
+    suffix += 1;
+  }
+  return `${base}-${suffix}`;
+}
+
+function resolveProviderIDForUpsert(selectedProviderType: string): string {
+  if (state.providerModal.mode === "edit" && state.providerModal.editingProviderID !== "") {
+    return state.providerModal.editingProviderID;
+  }
+  if (selectedProviderType === "") {
+    return "";
+  }
+  if (selectedProviderType === "openai") {
+    return "openai";
+  }
+  const baseProviderID = slugifyProviderID(modelsProviderNameInput.value) || slugifyProviderID(selectedProviderType) || "provider";
+  return ensureUniqueProviderID(baseProviderID);
+}
+
 function providerSupportsCustomModels(providerTypeID: string): boolean {
   const normalized = normalizeProviderTypeValue(providerTypeID);
   return normalized !== "" && !BUILTIN_PROVIDER_IDS.has(normalized);
@@ -2453,10 +2736,7 @@ function populateProviderForm(providerID: string): void {
 async function upsertProvider(): Promise<void> {
   syncControlState();
   const selectedProviderType = normalizeProviderTypeValue(modelsProviderTypeSelect.value);
-  const providerID =
-    state.providerModal.mode === "edit" && state.providerModal.editingProviderID !== ""
-      ? state.providerModal.editingProviderID
-      : selectedProviderType;
+  const providerID = resolveProviderIDForUpsert(selectedProviderType);
   if (providerID === "") {
     setStatus(t("error.providerTypeRequired"), "error");
     return;
@@ -2495,8 +2775,12 @@ async function upsertProvider(): Promise<void> {
     return;
   }
 
+  const customModelsEnabled =
+    state.providerModal.mode === "create"
+      ? providerSupportsCustomModels(selectedProviderType)
+      : providerSupportsCustomModels(providerID);
   let customModels: string[] | undefined;
-  if (providerSupportsCustomModels(providerID)) {
+  if (customModelsEnabled) {
     try {
       customModels = collectCustomModelIDs(modelsProviderCustomModelsRows);
     } catch (error) {
@@ -2732,100 +3016,6 @@ function collectProviderKVMap(
   return out;
 }
 
-async function refreshEnvs(): Promise<void> {
-  syncControlState();
-  try {
-    state.envs = await requestJSON<EnvVar[]>("/envs");
-    state.tabLoaded.envs = true;
-    renderEnvsPanel();
-    setStatus(t("status.envsLoaded", { count: state.envs.length }), "info");
-  } catch (error) {
-    setStatus(asErrorMessage(error), "error");
-  }
-}
-
-function renderEnvsPanel(): void {
-  envsTableBody.innerHTML = "";
-  if (state.envs.length === 0) {
-    const row = document.createElement("tr");
-    const col = document.createElement("td");
-    col.colSpan = 3;
-    col.className = "empty-cell";
-    col.textContent = t("env.empty");
-    row.appendChild(col);
-    envsTableBody.appendChild(row);
-  } else {
-    state.envs.forEach((env) => {
-      const row = document.createElement("tr");
-
-      const key = document.createElement("td");
-      key.className = "mono";
-      key.textContent = env.key;
-
-      const value = document.createElement("td");
-      value.className = "mono";
-      value.textContent = env.value;
-
-      const action = document.createElement("td");
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "secondary-btn";
-      button.dataset.envKey = env.key;
-      button.textContent = t("common.delete");
-      action.appendChild(button);
-
-      row.append(key, value, action);
-      envsTableBody.appendChild(row);
-    });
-  }
-
-  const envMap: Record<string, string> = {};
-  for (const env of state.envs) {
-    envMap[env.key] = env.value;
-  }
-  envsJSONInput.value = JSON.stringify(envMap, null, 2);
-}
-
-async function putEnvs(): Promise<void> {
-  syncControlState();
-  let body: Record<string, string>;
-  try {
-    body = parseEnvMap(envsJSONInput.value, {
-      invalidJSON: t("error.invalidEnvJSON"),
-      invalidMap: t("error.invalidEnvMap"),
-      invalidKey: t("error.invalidEnvKey"),
-      invalidValue: (key) => t("error.invalidEnvValue", { key }),
-    });
-  } catch (error) {
-    setStatus(asErrorMessage(error), "error");
-    return;
-  }
-
-  try {
-    state.envs = await requestJSON<EnvVar[]>("/envs", {
-      method: "PUT",
-      body,
-    });
-    renderEnvsPanel();
-    setStatus(t("status.envMapUpdated", { count: state.envs.length }), "info");
-  } catch (error) {
-    setStatus(asErrorMessage(error), "error");
-  }
-}
-
-async function deleteEnv(key: string): Promise<void> {
-  syncControlState();
-  try {
-    state.envs = await requestJSON<EnvVar[]>(`/envs/${encodeURIComponent(key)}`, {
-      method: "DELETE",
-    });
-    renderEnvsPanel();
-    setStatus(t("status.envDeleted", { key }), "info");
-  } catch (error) {
-    setStatus(asErrorMessage(error), "error");
-  }
-}
-
 function defaultQQChannelConfig(): QQChannelConfig {
   return {
     enabled: false,
@@ -2870,6 +3060,25 @@ function normalizeQQChannelConfig(raw: unknown): QQChannelConfig {
   };
 }
 
+function normalizeURLForCompare(raw: string): string {
+  return raw.trim().toLowerCase().replace(/\/+$/, "");
+}
+
+function resolveQQAPIEnvironment(apiBase: string): QQAPIEnvironment {
+  const normalized = normalizeURLForCompare(apiBase);
+  if (normalized === normalizeURLForCompare(QQ_SANDBOX_API_BASE)) {
+    return "sandbox";
+  }
+  return "production";
+}
+
+function resolveQQAPIBase(environment: QQAPIEnvironment): string {
+  if (environment === "sandbox") {
+    return QQ_SANDBOX_API_BASE;
+  }
+  return DEFAULT_QQ_API_BASE;
+}
+
 function renderQQChannelConfig(): void {
   const cfg = state.qqChannelConfig;
   const available = state.qqChannelAvailable;
@@ -2879,9 +3088,7 @@ function renderQQChannelConfig(): void {
   qqChannelClientSecretInput.value = cfg.client_secret;
   qqChannelBotPrefixInput.value = cfg.bot_prefix;
   qqChannelTargetTypeSelect.value = cfg.target_type;
-  qqChannelTargetIDInput.value = cfg.target_id;
-  qqChannelAPIBaseInput.value = cfg.api_base;
-  qqChannelTokenURLInput.value = cfg.token_url;
+  qqChannelAPIEnvironmentSelect.value = resolveQQAPIEnvironment(cfg.api_base);
   qqChannelTimeoutSecondsInput.value = String(cfg.timeout_seconds);
 
   const controls: Array<HTMLInputElement | HTMLSelectElement | HTMLButtonElement> = [
@@ -2890,15 +3097,14 @@ function renderQQChannelConfig(): void {
     qqChannelClientSecretInput,
     qqChannelBotPrefixInput,
     qqChannelTargetTypeSelect,
-    qqChannelTargetIDInput,
-    qqChannelAPIBaseInput,
-    qqChannelTokenURLInput,
+    qqChannelAPIEnvironmentSelect,
     qqChannelTimeoutSecondsInput,
   ];
   for (const control of controls) {
     control.disabled = !available;
   }
   syncCustomSelect(qqChannelTargetTypeSelect);
+  syncCustomSelect(qqChannelAPIEnvironmentSelect);
 }
 
 async function refreshQQChannelConfig(options: { silent?: boolean } = {}): Promise<void> {
@@ -2906,6 +3112,7 @@ async function refreshQQChannelConfig(options: { silent?: boolean } = {}): Promi
     const raw = await requestJSON<unknown>("/config/channels/qq");
     state.qqChannelConfig = normalizeQQChannelConfig(raw);
     state.qqChannelAvailable = true;
+    state.tabLoaded.channels = true;
     renderQQChannelConfig();
     if (!options.silent) {
       setStatus(t("status.qqChannelLoaded"), "info");
@@ -2913,6 +3120,7 @@ async function refreshQQChannelConfig(options: { silent?: boolean } = {}): Promi
   } catch (error) {
     state.qqChannelConfig = defaultQQChannelConfig();
     state.qqChannelAvailable = false;
+    state.tabLoaded.channels = false;
     renderQQChannelConfig();
     if (!options.silent) {
       setStatus(asErrorMessage(error), "error");
@@ -2921,15 +3129,16 @@ async function refreshQQChannelConfig(options: { silent?: boolean } = {}): Promi
 }
 
 function collectQQChannelFormConfig(): QQChannelConfig {
+  const apiEnvironment: QQAPIEnvironment = qqChannelAPIEnvironmentSelect.value === "sandbox" ? "sandbox" : "production";
   return {
     enabled: qqChannelEnabledInput.checked,
     app_id: qqChannelAppIDInput.value.trim(),
     client_secret: qqChannelClientSecretInput.value.trim(),
     bot_prefix: qqChannelBotPrefixInput.value,
     target_type: normalizeQQTargetType(qqChannelTargetTypeSelect.value),
-    target_id: qqChannelTargetIDInput.value.trim(),
-    api_base: qqChannelAPIBaseInput.value.trim() || DEFAULT_QQ_API_BASE,
-    token_url: qqChannelTokenURLInput.value.trim() || DEFAULT_QQ_TOKEN_URL,
+    target_id: state.qqChannelConfig.target_id,
+    api_base: resolveQQAPIBase(apiEnvironment),
+    token_url: state.qqChannelConfig.token_url || DEFAULT_QQ_TOKEN_URL,
     timeout_seconds: parseIntegerInput(qqChannelTimeoutSecondsInput.value, DEFAULT_QQ_TIMEOUT_SECONDS, 1),
   };
 }
@@ -2958,7 +3167,6 @@ async function saveQQChannelConfig(): Promise<void> {
 async function refreshWorkspace(options: { silent?: boolean } = {}): Promise<void> {
   syncControlState();
   try {
-    await refreshQQChannelConfig({ silent: true });
     const files = await listWorkspaceFiles();
     state.workspaceFiles = files;
     if (state.activeWorkspacePath !== "" && !files.some((file) => file.path === state.activeWorkspacePath)) {
@@ -3045,6 +3253,7 @@ async function createWorkspaceFile(): Promise<void> {
     workspaceNewPathInput.value = "";
     state.activeWorkspacePath = path;
     state.activeWorkspaceContent = JSON.stringify(createWorkspaceSkillTemplate(path), null, 2);
+    state.activeWorkspaceMode = "json";
     await refreshWorkspace({ silent: true });
     setWorkspaceEditorModalOpen(true);
     setStatus(t("status.workspaceFileCreated", { path }), "info");
@@ -3058,7 +3267,9 @@ async function openWorkspaceFile(path: string, options: { silent?: boolean } = {
   try {
     const payload = await getWorkspaceFile(path);
     state.activeWorkspacePath = path;
-    state.activeWorkspaceContent = JSON.stringify(payload, null, 2);
+    const prepared = prepareWorkspaceEditorPayload(payload);
+    state.activeWorkspaceContent = prepared.content;
+    state.activeWorkspaceMode = prepared.mode;
     renderWorkspaceFiles();
     renderWorkspaceEditor();
     setWorkspaceEditorModalOpen(true);
@@ -3079,16 +3290,22 @@ async function saveWorkspaceFile(): Promise<void> {
   }
 
   let payload: unknown;
-  try {
-    payload = JSON.parse(workspaceFileContentInput.value);
-  } catch {
-    setStatus(t("error.workspaceInvalidJSON"), "error");
-    return;
+  if (state.activeWorkspaceMode === "text") {
+    payload = { content: workspaceFileContentInput.value };
+  } else {
+    try {
+      payload = JSON.parse(workspaceFileContentInput.value);
+    } catch {
+      setStatus(t("error.workspaceInvalidJSON"), "error");
+      return;
+    }
   }
   try {
     await putWorkspaceFile(path, payload);
     state.activeWorkspacePath = path;
-    state.activeWorkspaceContent = JSON.stringify(payload, null, 2);
+    const prepared = prepareWorkspaceEditorPayload(payload);
+    state.activeWorkspaceContent = prepared.content;
+    state.activeWorkspaceMode = prepared.mode;
     await refreshWorkspace({ silent: true });
     setStatus(t("status.workspaceFileSaved", { path }), "info");
   } catch (error) {
@@ -3241,6 +3458,33 @@ function normalizeWorkspaceFiles(raw: unknown): WorkspaceFileInfo[] {
 function clearWorkspaceSelection(): void {
   state.activeWorkspacePath = "";
   state.activeWorkspaceContent = "";
+  state.activeWorkspaceMode = "json";
+}
+
+function prepareWorkspaceEditorPayload(payload: unknown): { content: string; mode: WorkspaceEditorMode } {
+  const textPayload = asWorkspaceTextPayload(payload);
+  if (textPayload) {
+    return {
+      content: textPayload.content,
+      mode: "text",
+    };
+  }
+  return {
+    content: JSON.stringify(payload, null, 2),
+    mode: "json",
+  };
+}
+
+function asWorkspaceTextPayload(payload: unknown): WorkspaceTextPayload | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (keys.length !== 1 || keys[0] !== "content") {
+    return null;
+  }
+  return typeof record.content === "string" ? { content: record.content } : null;
 }
 
 function normalizeWorkspaceInputPath(path: string): string {
@@ -3284,6 +3528,29 @@ function ensureCronSessionID(): void {
   }
 }
 
+function openCronEditModal(jobID: string): void {
+  const job = state.cronJobs.find((item) => item.id === jobID);
+  if (!job) {
+    setStatus(t("error.cronJobNotFound", { jobId: jobID }), "error");
+    return;
+  }
+
+  setCronModalMode("edit", jobID);
+
+  cronIDInput.value = job.id;
+  cronNameInput.value = job.name;
+  cronIntervalInput.value = job.schedule.cron ?? "";
+  cronSessionIDInput.value = job.dispatch.target.session_id ?? "";
+  cronMaxConcurrencyInput.value = String(job.runtime.max_concurrency ?? 1);
+  cronTimeoutInput.value = String(job.runtime.timeout_seconds ?? 30);
+  cronMisfireInput.value = String(job.runtime.misfire_grace_seconds ?? 0);
+  cronEnabledInput.checked = job.enabled;
+  cronTextInput.value = job.text ?? "";
+
+  syncCronDispatchHint();
+  setCronCreateModalOpen(true);
+}
+
 async function refreshCronJobs(): Promise<void> {
   syncControlState();
   syncCronDispatchHint();
@@ -3325,7 +3592,7 @@ function renderCronJobs(): void {
   if (state.cronJobs.length === 0) {
     const row = document.createElement("tr");
     const col = document.createElement("td");
-    col.colSpan = 5;
+    col.colSpan = 6;
     col.className = "empty-cell";
     col.textContent = t("cron.empty");
     row.appendChild(col);
@@ -3335,7 +3602,8 @@ function renderCronJobs(): void {
 
   state.cronJobs.forEach((job) => {
     const row = document.createElement("tr");
-    const nextRun = state.cronStates[job.id]?.next_run_at;
+    const jobState = state.cronStates[job.id];
+    const nextRun = jobState?.next_run_at;
 
     const idCol = document.createElement("td");
     idCol.className = "mono";
@@ -3350,20 +3618,66 @@ function renderCronJobs(): void {
     const nextCol = document.createElement("td");
     nextCol.textContent = nextRun ? compactTime(nextRun) : t("common.none");
 
+    const statusCol = document.createElement("td");
+    statusCol.textContent = formatCronStatus(jobState);
+    if (jobState?.last_error) {
+      statusCol.title = jobState.last_error;
+    }
+
     const actionCol = document.createElement("td");
+    const actions = document.createElement("div");
+    actions.className = "actions-row";
+
     const runBtn = document.createElement("button");
     runBtn.type = "button";
     runBtn.className = "secondary-btn";
     runBtn.dataset.cronRun = job.id;
     runBtn.textContent = t("cron.run");
-    actionCol.appendChild(runBtn);
 
-    row.append(idCol, nameCol, enabledCol, nextCol, actionCol);
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "secondary-btn";
+    editBtn.dataset.cronEdit = job.id;
+    editBtn.textContent = t("cron.edit");
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "danger-btn";
+    deleteBtn.dataset.cronDelete = job.id;
+    deleteBtn.textContent = t("cron.delete");
+
+    actions.append(runBtn, editBtn, deleteBtn);
+    actionCol.appendChild(actions);
+
+    row.append(idCol, nameCol, enabledCol, nextCol, statusCol, actionCol);
     cronJobsBody.appendChild(row);
   });
 }
 
-async function createCronJob(): Promise<boolean> {
+function formatCronStatus(stateValue: CronJobState | undefined): string {
+  if (!stateValue?.last_status) {
+    return t("common.none");
+  }
+  const normalized = stateValue.last_status.trim().toLowerCase();
+  if (normalized === "running") {
+    return t("cron.statusRunning");
+  }
+  if (normalized === "succeeded") {
+    return t("cron.statusSucceeded");
+  }
+  if (normalized === "failed") {
+    return t("cron.statusFailed");
+  }
+  if (normalized === "paused") {
+    return t("cron.statusPaused");
+  }
+  if (normalized === "resumed") {
+    return t("cron.statusResumed");
+  }
+  return stateValue.last_status;
+}
+
+async function saveCronJob(): Promise<boolean> {
   syncControlState();
 
   const id = cronIDInput.value.trim();
@@ -3392,47 +3706,74 @@ async function createCronJob(): Promise<boolean> {
   const maxConcurrency = parseIntegerInput(cronMaxConcurrencyInput.value, 1, 1);
   const timeoutSeconds = parseIntegerInput(cronTimeoutInput.value, 30, 1);
   const misfireGraceSeconds = parseIntegerInput(cronMisfireInput.value, 0, 0);
+  const editing = state.cronModal.mode === "edit";
+  const existingJob = state.cronJobs.find((job) => job.id === state.cronModal.editingJobID);
 
   const payload: CronJobSpec = {
     id,
     name,
     enabled: cronEnabledInput.checked,
     schedule: {
-      type: "interval",
+      type: existingJob?.schedule.type ?? "interval",
       cron: intervalText,
-      timezone: "",
+      timezone: existingJob?.schedule.timezone ?? "",
     },
-    task_type: "text",
+    task_type: existingJob?.task_type ?? "text",
     text,
     dispatch: {
-      type: "channel",
+      type: existingJob?.dispatch.type ?? "channel",
       channel: state.channel,
       target: {
         user_id: state.userId,
         session_id: sessionID,
       },
-      mode: "",
-      meta: {},
+      mode: existingJob?.dispatch.mode ?? "",
+      meta: existingJob?.dispatch.meta ?? {},
     },
     runtime: {
       max_concurrency: maxConcurrency,
       timeout_seconds: timeoutSeconds,
       misfire_grace_seconds: misfireGraceSeconds,
     },
-    meta: {},
+    meta: existingJob?.meta ?? {},
   };
 
   try {
-    await requestJSON<CronJobSpec>("/cron/jobs", {
-      method: "POST",
-      body: payload,
-    });
+    if (editing) {
+      await requestJSON<CronJobSpec>(`/cron/jobs/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        body: payload,
+      });
+    } else {
+      await requestJSON<CronJobSpec>("/cron/jobs", {
+        method: "POST",
+        body: payload,
+      });
+    }
     await refreshCronJobs();
-    setStatus(t("status.cronCreated", { jobId: id }), "info");
+    setStatus(t(editing ? "status.cronUpdated" : "status.cronCreated", { jobId: id }), "info");
     return true;
   } catch (error) {
     setStatus(asErrorMessage(error), "error");
     return false;
+  }
+}
+
+async function deleteCronJob(jobID: string): Promise<void> {
+  syncControlState();
+  if (!window.confirm(t("cron.deleteConfirm", { jobId: jobID }))) {
+    return;
+  }
+
+  try {
+    const result = await requestJSON<DeleteResult>(`/cron/jobs/${encodeURIComponent(jobID)}`, {
+      method: "DELETE",
+    });
+    await refreshCronJobs();
+    const messageKey = result.deleted ? "status.cronDeleted" : "status.cronDeleteSkipped";
+    setStatus(t(messageKey, { jobId: jobID }), "info");
+  } catch (error) {
+    setStatus(asErrorMessage(error), "error");
   }
 }
 
@@ -3443,6 +3784,7 @@ async function runCronJob(jobID: string): Promise<void> {
       method: "POST",
     });
     await refreshCronJobs();
+    await reloadChats();
     setStatus(t("status.cronRunRequested", { jobId: jobID, started: String(result.started) }), "info");
   } catch (error) {
     setStatus(asErrorMessage(error), "error");
@@ -3481,6 +3823,7 @@ function buildRequestInit(options: JSONRequestOptions): RequestInit {
     headers.set("accept-language", getLocale());
   }
   applyAuthHeaders(headers);
+  applyRequestSourceHeader(headers);
 
   let body: BodyInit | undefined;
   if (options.body !== undefined) {
@@ -3505,6 +3848,12 @@ function applyAuthHeaders(headers: Headers): void {
   }
   if (state.apiKey !== "") {
     headers.set("X-API-Key", state.apiKey);
+  }
+}
+
+function applyRequestSourceHeader(headers: Headers): void {
+  if (!headers.has(REQUEST_SOURCE_HEADER)) {
+    headers.set(REQUEST_SOURCE_HEADER, REQUEST_SOURCE_WEB);
   }
 }
 
@@ -3843,7 +4192,14 @@ function compactTime(value: string): string {
 }
 
 function isTabKey(value: string | undefined): value is TabKey {
-  return value === "chat" || value === "models" || value === "envs" || value === "workspace" || value === "cron";
+  return (
+    value === "chat" ||
+    value === "search" ||
+    value === "models" ||
+    value === "channels" ||
+    value === "workspace" ||
+    value === "cron"
+  );
 }
 
 function newSessionID(): string {

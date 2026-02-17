@@ -21,6 +21,7 @@ describe("web i18n", () => {
 
   it("validates i18n keys", () => {
     expect(isWebMessageKey("tab.chat")).toBe(true);
+    expect(isWebMessageKey("tab.channels")).toBe(true);
     expect(isWebMessageKey("tab.unknown")).toBe(false);
   });
 });

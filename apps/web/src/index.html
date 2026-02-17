@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CoPaw Next 控制台</title>
+    <title>NextAI 控制台</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -12,7 +12,7 @@
     <div class="app-shell">
       <header class="topbar">
         <div class="title-block">
-          <p class="kicker">CoPaw Next</p>
+          <p class="kicker">NextAI</p>
           <h1 data-i18n="app.console">控制台</h1>
         </div>
         <div class="topbar-actions">
@@ -51,7 +51,7 @@
                 </label>
                 <label>
                   <span data-i18n="control.channel">渠道</span>
-                  <input id="channel" type="text" placeholder="console" />
+                  <input id="channel" type="text" placeholder="console" readonly />
                 </label>
                 <label>
                   <span data-i18n="control.locale">语言</span>
@@ -69,8 +69,9 @@
 
       <nav class="tab-strip panel" aria-label="控制台标签页" data-i18n-aria-label="tab.ariaLabel">
         <button class="tab-btn active" data-tab="chat" type="button" data-i18n="tab.chat">聊天</button>
+        <button class="tab-btn" data-tab="search" type="button" data-i18n="tab.search">搜索</button>
         <button class="tab-btn" data-tab="models" type="button" data-i18n="tab.models">模型</button>
-        <button class="tab-btn" data-tab="envs" type="button" data-i18n="tab.envs">环境变量</button>
+        <button class="tab-btn" data-tab="channels" type="button" data-i18n="tab.channels">渠道</button>
         <button class="tab-btn" data-tab="workspace" type="button" data-i18n="tab.workspace">配置</button>
         <button class="tab-btn" data-tab="cron" type="button" data-i18n="tab.cron">定时任务</button>
       </nav>
@@ -109,6 +110,32 @@
                   <button id="send-btn" type="submit" data-i18n="chat.send">发送（SSE）</button>
                 </div>
               </form>
+            </section>
+          </div>
+        </section>
+
+        <section id="panel-search" class="tab-panel panel stack-panel">
+          <div class="panel-head">
+            <h2 data-i18n="search.title">搜索会话</h2>
+          </div>
+          <div class="panel-body stack-block search-panel-body">
+            <section class="subpanel">
+              <form class="stack-form search-form" id="search-chat-form">
+                <label>
+                  <span data-i18n="search.inputLabel">关键词</span>
+                  <input
+                    id="search-chat-input"
+                    type="search"
+                    placeholder="输入会话名、Session ID、用户 ID 或渠道"
+                    data-i18n-placeholder="search.inputPlaceholder"
+                  />
+                </label>
+              </form>
+              <p class="hint" data-i18n="search.hint">按会话名、Session ID、用户 ID、渠道进行匹配。</p>
+            </section>
+            <section class="subpanel">
+              <h3 data-i18n="search.results">搜索结果</h3>
+              <ul id="search-chat-results" class="search-result-list detail-list"></ul>
             </section>
           </div>
         </section>
@@ -157,57 +184,14 @@
           </div>
         </section>
 
-        <section id="panel-envs" class="tab-panel panel stack-panel">
+        <section id="panel-channels" class="tab-panel panel stack-panel">
           <div class="panel-head">
-            <h2 data-i18n="env.title">环境变量</h2>
-            <button id="refresh-envs" type="button" data-i18n="common.refresh">刷新</button>
-          </div>
-          <div class="panel-body split-grid">
-            <section class="subpanel">
-              <h3 data-i18n="env.current">当前环境变量</h3>
-              <div class="table-wrap">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th data-i18n="env.key">键</th>
-                      <th data-i18n="env.value">值</th>
-                      <th data-i18n="env.action">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody id="envs-table-body"></tbody>
-                </table>
-              </div>
-            </section>
-
-            <section class="subpanel">
-              <h3 data-i18n="env.replaceJSON">使用 JSON Map 全量替换</h3>
-              <form id="envs-form" class="stack-form">
-                <label>
-                  <span data-i18n="env.jsonLabel">JSON (`{"KEY":"VALUE"}`)</span>
-                  <textarea id="envs-json" rows="12" placeholder='{"OPENAI_API_KEY":"sk-***"}'></textarea>
-                </label>
-                <button type="submit" data-i18n="env.submitPut">提交到 PUT /envs</button>
-              </form>
-            </section>
-          </div>
-        </section>
-
-        <section id="panel-workspace" class="tab-panel panel stack-panel">
-          <div class="panel-head">
-            <h2 data-i18n="workspace.title">配置页面</h2>
-            <div class="actions-row panel-actions">
-              <button id="workspace-import-open-btn" type="button" aria-controls="workspace-import-modal" aria-expanded="false" data-i18n="workspace.importJSON">
-                导入 JSON
-              </button>
-              <button id="refresh-workspace" type="button" data-i18n="common.refresh">刷新</button>
-            </div>
+            <h2 data-i18n="channels.title">渠道</h2>
+            <button id="refresh-qq-channel" type="button" data-i18n="common.refresh">刷新</button>
           </div>
           <div class="panel-body stack-block">
             <section class="subpanel">
-              <div class="panel-head">
-                <h3 data-i18n="workspace.qqChannelTitle">QQ 渠道配置</h3>
-                <button id="refresh-qq-channel" type="button" class="secondary-btn" data-i18n="common.refresh">刷新</button>
-              </div>
+              <h3 data-i18n="workspace.qqChannelTitle">QQ 渠道配置</h3>
               <p class="hint" data-i18n="workspace.qqChannelHint">读取并保存 `/config/channels/qq` 配置。</p>
               <form id="qq-channel-form" class="stack-form">
                 <div class="channel-config-grid">
@@ -236,16 +220,11 @@
                     </select>
                   </label>
                   <label>
-                    <span data-i18n="workspace.qqTargetID">目标 ID</span>
-                    <input id="qq-channel-target-id" type="text" placeholder="user_openid / group_openid / channel_id" />
-                  </label>
-                  <label>
-                    <span data-i18n="workspace.qqAPIBase">API Base</span>
-                    <input id="qq-channel-api-base" type="url" placeholder="https://api.sgroup.qq.com" />
-                  </label>
-                  <label>
-                    <span data-i18n="workspace.qqTokenURL">Token URL</span>
-                    <input id="qq-channel-token-url" type="url" placeholder="https://bots.qq.com/app/getAppAccessToken" />
+                    <span data-i18n="workspace.qqAPIEnvironment">API 环境</span>
+                    <select id="qq-channel-api-env">
+                      <option value="production" data-i18n="workspace.qqAPIEnvironmentProduction">生产</option>
+                      <option value="sandbox" data-i18n="workspace.qqAPIEnvironmentSandbox">沙箱</option>
+                    </select>
                   </label>
                   <label>
                     <span data-i18n="workspace.qqTimeoutSeconds">超时秒数</span>
@@ -257,6 +236,20 @@
                 </div>
               </form>
             </section>
+          </div>
+        </section>
+
+        <section id="panel-workspace" class="tab-panel panel stack-panel">
+          <div class="panel-head">
+            <h2 data-i18n="workspace.title">配置文件</h2>
+            <div class="actions-row panel-actions">
+              <button id="workspace-import-open-btn" type="button" aria-controls="workspace-import-modal" aria-expanded="false" data-i18n="workspace.importJSON">
+                导入 JSON
+              </button>
+              <button id="refresh-workspace" type="button" data-i18n="common.refresh">刷新</button>
+            </div>
+          </div>
+          <div class="panel-body stack-block">
             <section class="subpanel">
               <h3 data-i18n="workspace.files">配置文件列表</h3>
               <p class="hint" data-i18n="workspace.filesHint">读取 `GET /workspace/files`，选择后可编辑配置。</p>
@@ -287,7 +280,12 @@
         <section id="panel-cron" class="tab-panel panel stack-panel">
           <div class="panel-head">
             <h2 data-i18n="cron.title">定时任务</h2>
-            <button id="refresh-cron" type="button" data-i18n="common.refresh">刷新</button>
+            <div class="actions-row panel-actions">
+              <button id="cron-create-open-btn" type="button" aria-controls="cron-create-modal" aria-expanded="false" data-i18n="cron.openCreateModal">
+                打开创建窗口
+              </button>
+              <button id="refresh-cron" type="button" data-i18n="common.refresh">刷新</button>
+            </div>
           </div>
           <div class="panel-body stack-block">
             <section class="subpanel">
@@ -300,18 +298,12 @@
                       <th data-i18n="cron.name">名称</th>
                       <th data-i18n="cron.enabled">启用</th>
                       <th data-i18n="cron.nextRun">下次运行</th>
+                      <th data-i18n="cron.status">状态</th>
                       <th data-i18n="cron.action">操作</th>
                     </tr>
                   </thead>
                   <tbody id="cron-jobs-body"></tbody>
                 </table>
-              </div>
-            </section>
-
-            <section class="subpanel">
-              <div class="cron-create-launcher">
-                <h3 data-i18n="cron.createTextJob">创建间隔文本任务</h3>
-                <button id="cron-create-open-btn" type="button" data-i18n="cron.openCreateModal">打开创建窗口</button>
               </div>
             </section>
           </div>
@@ -381,7 +373,7 @@
           </div>
           <div class="workspace-editor-modal-content workspace-neumorph">
             <section class="workspace-neumorph-block">
-              <h3 data-i18n="cron.createTextJob">创建间隔文本任务</h3>
+              <h3 id="cron-create-form-title" data-i18n="cron.createTextJob">创建间隔文本任务</h3>
               <p id="cron-dispatch-hint" class="hint"></p>
               <form id="cron-create-form" class="stack-form cron-form-grid">
                 <label>
@@ -422,7 +414,7 @@
                 </label>
                 <div class="full-row actions-row">
                   <button id="cron-new-session" type="button" data-i18n="cron.newSession">生成新 Session ID</button>
-                  <button type="submit" data-i18n="cron.submitCreate">提交到 POST /cron/jobs</button>
+                  <button id="cron-submit-btn" type="submit" data-i18n="cron.submitCreate">提交到 POST /cron/jobs</button>
                 </div>
               </form>
             </section>

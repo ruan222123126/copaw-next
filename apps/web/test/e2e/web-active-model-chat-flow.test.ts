@@ -34,7 +34,7 @@ describe("web e2e: set active model then send chat", () => {
       "",
     );
     window.localStorage.clear();
-    window.localStorage.setItem("copaw-next.web.locale", "zh-CN");
+    window.localStorage.setItem("nextai.web.locale", "zh-CN");
     originalFetch = globalThis.fetch;
   });
 
@@ -207,5 +207,110 @@ describe("web e2e: set active model then send chat", () => {
     expect(text).toContain(replies.model);
     expect(text).not.toContain("Echo:");
     expect(processCalled).toBe(true);
+  });
+
+  it("添加 openai-compatible 提供商时不会覆盖同类型已有配置", async () => {
+    const existingProviderID = "openai-compatible";
+    const modelID = "ark-code-latest";
+    const catalogProviders = [
+      {
+        id: existingProviderID,
+        name: "OPENAI-COMPATIBLE",
+        display_name: "已有 Provider",
+        openai_compatible: true,
+        api_key_prefix: "OPENAI_COMPATIBLE_API_KEY",
+        models: [{ id: modelID, name: modelID }],
+        allow_custom_base_url: true,
+        enabled: true,
+        has_api_key: true,
+        current_api_key: "skm***123",
+        current_base_url: "https://example.com/v1",
+      },
+    ];
+
+    let configuredProviderID = "";
+    let overwroteExisting = false;
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const rawURL = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const url = new URL(rawURL);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.pathname === "/chats" && method === "GET") {
+        return jsonResponse([]);
+      }
+
+      if (url.pathname === "/models/catalog" && method === "GET") {
+        return jsonResponse({
+          providers: catalogProviders,
+          provider_types: [
+            { id: "openai", display_name: "openai" },
+            { id: "openai-compatible", display_name: "openai Compatible" },
+          ],
+          defaults: Object.fromEntries(catalogProviders.map((provider) => [provider.id, modelID])),
+          active_llm: {
+            provider_id: existingProviderID,
+            model: modelID,
+          },
+        });
+      }
+
+      if (url.pathname.startsWith("/models/") && url.pathname.endsWith("/config") && method === "PUT") {
+        const rawProviderID = url.pathname.slice("/models/".length, url.pathname.length - "/config".length);
+        configuredProviderID = decodeURIComponent(rawProviderID);
+        const exists = catalogProviders.some((provider) => provider.id === configuredProviderID);
+        if (exists) {
+          overwroteExisting = true;
+        } else {
+          catalogProviders.push({
+            id: configuredProviderID,
+            name: configuredProviderID.toUpperCase(),
+            display_name: configuredProviderID,
+            openai_compatible: true,
+            api_key_prefix: "OPENAI_COMPATIBLE_API_KEY",
+            models: [{ id: modelID, name: modelID }],
+            allow_custom_base_url: true,
+            enabled: true,
+            has_api_key: false,
+            current_api_key: "",
+            current_base_url: "",
+          });
+        }
+        return jsonResponse(catalogProviders.find((provider) => provider.id === configuredProviderID) ?? {}, 200);
+      }
+
+      throw new Error(`unexpected request: ${method} ${url.pathname}`);
+    }) as typeof globalThis.fetch;
+
+    await import("../../src/main.ts");
+
+    const modelsTabButton = document.querySelector<HTMLButtonElement>('button[data-tab="models"]');
+    expect(modelsTabButton).not.toBeNull();
+    modelsTabButton?.click();
+
+    const addProviderButton = document.getElementById("models-add-provider-btn") as HTMLButtonElement;
+    addProviderButton.click();
+
+    await waitFor(() => {
+      const modal = document.getElementById("models-provider-modal");
+      return Boolean(modal && !modal.classList.contains("is-hidden"));
+    });
+
+    const providerTypeSelect = document.getElementById("models-provider-type-select") as HTMLSelectElement;
+    providerTypeSelect.value = "openai-compatible";
+    providerTypeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+
+    const providerNameInput = document.getElementById("models-provider-name-input") as HTMLInputElement;
+    providerNameInput.value = "";
+
+    const providerForm = document.getElementById("models-provider-form") as HTMLFormElement;
+    providerForm.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await waitFor(() => configuredProviderID !== "");
+
+    expect(configuredProviderID).toBe("openai-compatible-2");
+    expect(overwroteExisting).toBe(false);
+    expect(catalogProviders.map((provider) => provider.id)).toContain(existingProviderID);
+    expect(catalogProviders.map((provider) => provider.id)).toContain("openai-compatible-2");
   });
 });
