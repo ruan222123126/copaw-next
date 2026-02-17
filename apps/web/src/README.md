@@ -5,7 +5,7 @@ Current scope:
   - Session list (`GET /chats`)
   - Chat history (`GET /chats/{chat_id}`)
   - Streaming send (`POST /agent/process` with SSE parsing)
-  - Agent event timeline (`step_started/tool_call/tool_result/completed`)
+  - Tool call raw payload in chat message (`tool_call` -> 原始 SSE JSON 文本)
 - Models tab
   - Providers catalog (`GET /models/catalog`, fallback to `GET /models`)
   - Active model view (`GET /models/active`)
@@ -17,7 +17,7 @@ Current scope:
 - Config tab
   - File list (`GET /workspace/files`)
   - File read/edit/save/delete (`GET/PUT/DELETE /workspace/files/{file_path}`)
-  - JSON export/import (`GET /workspace/export`, `POST /workspace/import`)
+  - JSON import (`POST /workspace/import`)
 - Cron tab
   - Jobs list (`GET /cron/jobs` + optional `GET /cron/jobs/{id}/state` for `next_run_at`)
   - Create interval text job (`POST /cron/jobs`)

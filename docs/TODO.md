@@ -1,6 +1,6 @@
 # CoPaw Next TODO
 
-更新时间：2026-02-16 23:43:59 +0800
+更新时间：2026-02-17 11:44:29 +0800
 
 ## 执行约定（强制）
 - 每位接手 AI 开始前，必须先阅读本文件与 `/home/ruan/.codex/handoff/latest.md`。
@@ -31,6 +31,20 @@
 ## 6. 实操验证（汇总）
 - [x] Go/TS 全量关键检查通过：`go test ./...`、`make gateway-coverage`、`pnpm -r lint/test/build`。
 - [x] 分模块验证通过：Web、CLI、Contracts、SDK 生成、Gateway provider 兼容性相关回归均已通过。
+- [x] 2026-02-17 11:44 +0800 Web 新增“QQ 渠道配置”面板：在配置页提供 `app_id/client_secret/target_type/target_id/api_base/token_url/timeout_seconds` 可视化编辑，直连 `/config/channels/qq` 读写。
+- [x] 2026-02-17 11:44 +0800 验证通过：`pnpm -C apps/web test`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 11:43 +0800 Web 工具调用文案优化：`view` / `edit`（兼容 `exit`）调用摘要改为“查看（文件路径）/编辑（文件路径）”，不再显示“调用任务 'view' / 'edit'”；补充 e2e 回归覆盖流式展示与历史恢复。
+- [x] 2026-02-17 11:43 +0800 验证通过：`pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 11:35 +0800 QQ 入站闭环落地：新增 `POST /channels/qq/inbound`，支持解析 QQ 入站事件（c2c/group/guild）并复用 `/agent/process` 主流程，按事件动态覆盖 `qq` 通道 `target_type/target_id/msg_id` 后回发。
+- [x] 2026-02-17 11:35 +0800 验证通过：`cd apps/gateway && go test ./...`、`pnpm --filter @copaw-next/tests-contract run lint`、`pnpm --filter @copaw-next/tests-contract run test`、`pnpm --dir packages/sdk-ts run generate && pnpm --dir packages/sdk-ts run generate:check`。
+- [x] 2026-02-17 11:34 +0800 聊天工具调用顺序渲染修复：Web 聊天消息改为按流式事件时间线渲染（支持“文本 -> 工具 -> 文本”交错），不再将工具调用统一压在消息底部。
+- [x] 2026-02-17 11:34 +0800 验证通过：`pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 11:27 +0800 聊天工具调用持久化修复：Gateway 将 `tool_call` 原始事件与文本/工具顺序写入 assistant `metadata`（`tool_call_notices`/`text_order`/`tool_order`），Web 打开历史会话时从 metadata 恢复工具调用展示，刷新后不再丢失。
+- [x] 2026-02-17 11:27 +0800 验证通过：`cd apps/gateway && go test ./...`、`pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 11:25 +0800 QQ 频道接入完成：Gateway 新增静态 `qq` channel 插件（token 获取与缓存、`c2c/group/guild` 发送、`bot_prefix` 支持），`/config/channels` 默认配置与契约文档同步补齐。
+- [x] 2026-02-17 11:25 +0800 验证通过：`cd apps/gateway && go test ./...`、`pnpm --filter @copaw-next/tests-contract run lint`、`pnpm --filter @copaw-next/tests-contract run test`。
+- [x] 2026-02-17 11:23 +0800 聊天消息渲染顺序修复：Web 聊天区改为按输出先后展示（谁先输出谁在上），不再固定工具块总在顶部；补充 e2e 覆盖“文本先到时文本在上、工具后到时工具在下”的顺序断言。
+- [x] 2026-02-17 11:23 +0800 验证通过：`pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts` 与 `pnpm -C apps/web build`。
 - [x] 实际运行验证通过：Gateway 可启动并通过 `/healthz`、`/version`、`/chats`；CLI 可跑通 chat/cron；Web 静态服务可访问。
 - [x] Provider 管理策略验证通过：支持新增自定义 provider、内置/自定义 provider 删除、可删空；删掉激活 provider 后 `active_llm` 置空并返回空字符串字段。
 - [x] 2026-02-16 13:34 +0800 现场启动验证：执行 `make gateway` 成功，`/healthz` 返回 `{"ok":true}`，`/version` 返回 `{"version":"0.1.0"}`，`/chats` 返回 `[]`。
@@ -69,8 +83,11 @@
 - [x] 2026-02-16 23:37 +0800 e2e 默认导出行为覆盖补齐：新增 `workspace export` 未传 `--out` 的 e2e 用例，断言默认输出文件名为 `workspace.json`。
 - [x] 2026-02-16 23:40 +0800 e2e 默认导入行为覆盖补齐：新增 `workspace import` 输入缺省 `mode` 时默认补 `replace` 的 e2e 用例。
 - [x] 2026-02-16 23:44 +0800 e2e 失败场景覆盖补齐：新增 `workspace put` 同时缺少 `--body` 与 `--file` 的失败场景覆盖。
+- [x] 2026-02-17 11:29 +0800 服务重启验证：停止存量 Gateway/Web（含 `go run` 派生 `gateway` 进程）后重启 Gateway（`NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）与 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`。
+- [x] 2026-02-17 11:37 +0800 服务重启验证：再次停止存量 Gateway/Web（含 `go run` 派生 `gateway` 进程）后重启 Gateway（`NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）与 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`。
+- [x] 2026-02-17 11:44 +0800 服务重启验证：再次停止存量 Gateway/Web（含 `go run` 派生 `gateway` 进程）后重启 Gateway（`NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）与 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`。
 
-## 7. 当前未完成项与阻塞（2026-02-16 23:40:55 +0800）
+## 7. 当前未完成项与阻塞（2026-02-17 11:44:29 +0800）
 - [x] 设计并实现 provider 可删除方案（含内置 provider），并完成 catalog/active/default 语义调整：删除后从 `/models/catalog` 消失；删掉激活 provider 后 `active_llm` 置空。
 - [x] 风险已消除：删除全部 provider 后，`/agent/process` 在 `active_llm` 为空时走内部 demo 回声兜底；并有回归测试覆盖（`apps/gateway/internal/app/server_test.go`）。
 - [ ] 阻塞：无法将 PR 分支远端回退到 `1c94b19`。原因：当前环境策略禁止强推（`git push --force-with-lease` 与 `git push origin +ref` 均被 policy 拦截）；仅普通 `git push` 可执行但因 non-fast-forward 被拒绝。

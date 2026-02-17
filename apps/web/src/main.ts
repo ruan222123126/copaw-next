@@ -24,6 +24,7 @@ interface RuntimeMessage {
   id?: string;
   role?: string;
   content?: RuntimeContent[];
+  metadata?: Record<string, unknown>;
 }
 
 interface ChatHistoryResponse {
@@ -157,10 +158,41 @@ interface CronJobState {
   paused?: boolean;
 }
 
+type QQTargetType = "c2c" | "group" | "guild";
+
+interface QQChannelConfig {
+  enabled: boolean;
+  app_id: string;
+  client_secret: string;
+  bot_prefix: string;
+  target_type: QQTargetType;
+  target_id: string;
+  api_base: string;
+  token_url: string;
+  timeout_seconds: number;
+}
+
 interface ViewMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
+  toolCalls: ViewToolCallNotice[];
+  textOrder?: number;
+  toolOrder?: number;
+  timeline: ViewMessageTimelineEntry[];
+}
+
+interface ViewToolCallNotice {
+  summary: string;
+  raw: string;
+  order?: number;
+}
+
+interface ViewMessageTimelineEntry {
+  type: "text" | "tool_call";
+  order: number;
+  text?: string;
+  toolCall?: ViewToolCallNotice;
 }
 
 interface AgentToolCallPayload {
@@ -182,11 +214,7 @@ interface AgentStreamEvent {
   tool_call?: AgentToolCallPayload;
   tool_result?: AgentToolResultPayload;
   meta?: Record<string, unknown>;
-}
-
-interface ViewAgentEvent {
-  id: string;
-  text: string;
+  raw?: string;
 }
 
 interface JSONRequestOptions {
@@ -195,14 +223,26 @@ interface JSONRequestOptions {
   headers?: Record<string, string>;
 }
 
+interface CustomSelectInstance {
+  container: HTMLDivElement;
+  trigger: HTMLDivElement;
+  selectedText: HTMLSpanElement;
+  optionsList: HTMLDivElement;
+}
+
 const DEFAULT_API_BASE = "http://127.0.0.1:8088";
 const DEFAULT_API_KEY = "";
 const DEFAULT_USER_ID = "demo-user";
 const DEFAULT_CHANNEL = "console";
+const DEFAULT_QQ_API_BASE = "https://api.sgroup.qq.com";
+const DEFAULT_QQ_TOKEN_URL = "https://bots.qq.com/app/getAppAccessToken";
+const DEFAULT_QQ_TIMEOUT_SECONDS = 8;
 const SETTINGS_KEY = "copaw-next.web.chat.settings";
 const LOCALE_KEY = "copaw-next.web.locale";
 const BUILTIN_PROVIDER_IDS = new Set(["openai"]);
 const TABS: TabKey[] = ["chat", "models", "envs", "workspace", "cron"];
+const customSelectInstances = new Map<HTMLSelectElement, CustomSelectInstance>();
+let customSelectGlobalEventsBound = false;
 
 const apiBaseInput = mustElement<HTMLInputElement>("api-base");
 const apiKeyInput = mustElement<HTMLInputElement>("api-key");
@@ -212,6 +252,7 @@ const localeSelect = mustElement<HTMLSelectElement>("locale-select");
 const reloadChatsButton = mustElement<HTMLButtonElement>("reload-chats");
 const settingsToggleButton = mustElement<HTMLButtonElement>("settings-toggle");
 const settingsPopover = mustElement<HTMLElement>("settings-popover");
+const settingsPopoverCloseButton = mustElement<HTMLButtonElement>("settings-popover-close");
 const statusLine = mustElement<HTMLElement>("status-line");
 
 const tabButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".tab-btn"));
@@ -227,7 +268,6 @@ const chatList = mustElement<HTMLUListElement>("chat-list");
 const chatTitle = mustElement<HTMLElement>("chat-title");
 const chatSession = mustElement<HTMLElement>("chat-session");
 const messageList = mustElement<HTMLUListElement>("message-list");
-const agentEventList = mustElement<HTMLUListElement>("agent-event-list");
 const composerForm = mustElement<HTMLFormElement>("composer");
 const messageInput = mustElement<HTMLTextAreaElement>("message-input");
 const sendButton = mustElement<HTMLButtonElement>("send-btn");
@@ -266,20 +306,38 @@ const envsForm = mustElement<HTMLFormElement>("envs-form");
 const envsJSONInput = mustElement<HTMLTextAreaElement>("envs-json");
 
 const refreshWorkspaceButton = mustElement<HTMLButtonElement>("refresh-workspace");
+const workspaceImportOpenButton = mustElement<HTMLButtonElement>("workspace-import-open-btn");
+const refreshQQChannelButton = mustElement<HTMLButtonElement>("refresh-qq-channel");
+const qqChannelForm = mustElement<HTMLFormElement>("qq-channel-form");
+const qqChannelEnabledInput = mustElement<HTMLInputElement>("qq-channel-enabled");
+const qqChannelAppIDInput = mustElement<HTMLInputElement>("qq-channel-app-id");
+const qqChannelClientSecretInput = mustElement<HTMLInputElement>("qq-channel-client-secret");
+const qqChannelBotPrefixInput = mustElement<HTMLInputElement>("qq-channel-bot-prefix");
+const qqChannelTargetTypeSelect = mustElement<HTMLSelectElement>("qq-channel-target-type");
+const qqChannelTargetIDInput = mustElement<HTMLInputElement>("qq-channel-target-id");
+const qqChannelAPIBaseInput = mustElement<HTMLInputElement>("qq-channel-api-base");
+const qqChannelTokenURLInput = mustElement<HTMLInputElement>("qq-channel-token-url");
+const qqChannelTimeoutSecondsInput = mustElement<HTMLInputElement>("qq-channel-timeout-seconds");
 const workspaceFilesBody = mustElement<HTMLTableSectionElement>("workspace-files-body");
 const workspaceCreateFileForm = mustElement<HTMLFormElement>("workspace-create-file-form");
 const workspaceNewPathInput = mustElement<HTMLInputElement>("workspace-new-path");
+const workspaceEditorModal = mustElement<HTMLElement>("workspace-editor-modal");
+const workspaceEditorModalCloseButton = mustElement<HTMLButtonElement>("workspace-editor-modal-close-btn");
+const workspaceImportModal = mustElement<HTMLElement>("workspace-import-modal");
+const workspaceImportModalCloseButton = mustElement<HTMLButtonElement>("workspace-import-modal-close-btn");
 const workspaceEditorForm = mustElement<HTMLFormElement>("workspace-editor-form");
 const workspaceFilePathInput = mustElement<HTMLInputElement>("workspace-file-path");
 const workspaceFileContentInput = mustElement<HTMLTextAreaElement>("workspace-file-content");
 const workspaceSaveFileButton = mustElement<HTMLButtonElement>("workspace-save-file-btn");
 const workspaceDeleteFileButton = mustElement<HTMLButtonElement>("workspace-delete-file-btn");
-const workspaceExportButton = mustElement<HTMLButtonElement>("workspace-export-btn");
 const workspaceImportForm = mustElement<HTMLFormElement>("workspace-import-form");
 const workspaceJSONInput = mustElement<HTMLTextAreaElement>("workspace-json");
 
 const refreshCronButton = mustElement<HTMLButtonElement>("refresh-cron");
 const cronJobsBody = mustElement<HTMLTableSectionElement>("cron-jobs-body");
+const cronCreateOpenButton = mustElement<HTMLButtonElement>("cron-create-open-btn");
+const cronCreateModal = mustElement<HTMLElement>("cron-create-modal");
+const cronCreateModalCloseButton = mustElement<HTMLButtonElement>("cron-create-modal-close-btn");
 const cronCreateForm = mustElement<HTMLFormElement>("cron-create-form");
 const cronDispatchHint = mustElement<HTMLElement>("cron-dispatch-hint");
 const cronIDInput = mustElement<HTMLInputElement>("cron-id");
@@ -319,7 +377,7 @@ const state = {
   activeChatId: null as string | null,
   activeSessionId: newSessionID(),
   messages: [] as ViewMessage[],
-  agentEvents: [] as ViewAgentEvent[],
+  messageOutputOrder: 0,
   sending: false,
 
   providers: [] as ProviderInfo[],
@@ -333,25 +391,31 @@ const state = {
   },
   envs: [] as EnvVar[],
   workspaceFiles: [] as WorkspaceFileInfo[],
+  qqChannelConfig: defaultQQChannelConfig(),
+  qqChannelAvailable: true,
   activeWorkspacePath: "",
   activeWorkspaceContent: "",
   cronJobs: [] as CronJobSpec[],
   cronStates: {} as Record<string, CronJobState>,
 };
 
-void bootstrap();
+const bootstrapTask = bootstrap();
 
 async function bootstrap(): Promise<void> {
   initLocale();
   restoreSettings();
   bindEvents();
+  initCustomSelects();
   setSettingsPopoverOpen(false);
+  setWorkspaceEditorModalOpen(false);
+  setWorkspaceImportModalOpen(false);
+  setCronCreateModalOpen(false);
   applyLocaleToDocument();
   renderTabPanels();
   renderChatHeader();
   renderChatList();
   renderMessages();
-  renderAgentEvents();
+  renderQQChannelConfig();
   renderWorkspaceFiles();
   renderWorkspaceEditor();
   syncCronDispatchHint();
@@ -385,7 +449,15 @@ function bindEvents(): void {
     setSettingsPopoverOpen(!isSettingsPopoverOpen());
   });
   settingsPopover.addEventListener("click", (event) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest("[data-settings-close=\"true\"]")) {
+      setSettingsPopoverOpen(false);
+      return;
+    }
     event.stopPropagation();
+  });
+  settingsPopoverCloseButton.addEventListener("click", () => {
+    setSettingsPopoverOpen(false);
   });
   document.addEventListener("click", (event) => {
     if (!isSettingsPopoverOpen()) {
@@ -450,6 +522,20 @@ function bindEvents(): void {
   composerForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     await sendMessage();
+  });
+  messageInput.addEventListener("keydown", (event) => {
+    if (
+      event.key !== "Enter" ||
+      event.shiftKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey ||
+      event.isComposing
+    ) {
+      return;
+    }
+    event.preventDefault();
+    void sendMessage();
   });
 
   refreshModelsButton.addEventListener("click", async () => {
@@ -581,9 +667,41 @@ function bindEvents(): void {
   refreshWorkspaceButton.addEventListener("click", async () => {
     await refreshWorkspace();
   });
+  refreshQQChannelButton.addEventListener("click", async () => {
+    await refreshQQChannelConfig();
+  });
+  qqChannelForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await saveQQChannelConfig();
+  });
+  workspaceImportOpenButton.addEventListener("click", () => {
+    setWorkspaceImportModalOpen(true);
+  });
   workspaceCreateFileForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     await createWorkspaceFile();
+  });
+  workspaceEditorModal.addEventListener("click", (event) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest("[data-workspace-editor-close=\"true\"]")) {
+      setWorkspaceEditorModalOpen(false);
+      return;
+    }
+    event.stopPropagation();
+  });
+  workspaceEditorModalCloseButton.addEventListener("click", () => {
+    setWorkspaceEditorModalOpen(false);
+  });
+  workspaceImportModal.addEventListener("click", (event) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest("[data-workspace-import-close=\"true\"]")) {
+      setWorkspaceImportModalOpen(false);
+      return;
+    }
+    event.stopPropagation();
+  });
+  workspaceImportModalCloseButton.addEventListener("click", () => {
+    setWorkspaceImportModalOpen(false);
   });
   workspaceFilesBody.addEventListener("click", async (event) => {
     const target = event.target;
@@ -620,12 +738,43 @@ function bindEvents(): void {
     }
     await deleteWorkspaceFile(path);
   });
-  workspaceExportButton.addEventListener("click", async () => {
-    await exportWorkspaceJSON();
-  });
   workspaceImportForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     await importWorkspaceJSON();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !isWorkspaceEditorModalOpen()) {
+      return;
+    }
+    setWorkspaceEditorModalOpen(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !isWorkspaceImportModalOpen()) {
+      return;
+    }
+    setWorkspaceImportModalOpen(false);
+  });
+  cronCreateOpenButton.addEventListener("click", () => {
+    syncCronDispatchHint();
+    ensureCronSessionID();
+    setCronCreateModalOpen(true);
+  });
+  cronCreateModal.addEventListener("click", (event) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest("[data-cron-create-close=\"true\"]")) {
+      setCronCreateModalOpen(false);
+      return;
+    }
+    event.stopPropagation();
+  });
+  cronCreateModalCloseButton.addEventListener("click", () => {
+    setCronCreateModalOpen(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !isCronCreateModalOpen()) {
+      return;
+    }
+    setCronCreateModalOpen(false);
   });
 
   refreshCronButton.addEventListener("click", async () => {
@@ -636,7 +785,10 @@ function bindEvents(): void {
   });
   cronCreateForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    await createCronJob();
+    const created = await createCronJob();
+    if (created) {
+      setCronCreateModalOpen(false);
+    }
   });
   cronJobsBody.addEventListener("click", async (event) => {
     const target = event.target;
@@ -655,6 +807,251 @@ function bindEvents(): void {
   });
 }
 
+function initCustomSelects(): void {
+  document.body.classList.add("select-enhanced");
+  const selects = Array.from(document.querySelectorAll<HTMLSelectElement>(".controls select, .stack-form select"));
+  for (const select of selects) {
+    if (customSelectInstances.has(select)) {
+      continue;
+    }
+    enhanceSelectControl(select);
+  }
+  bindCustomSelectGlobalEvents();
+  syncAllCustomSelects();
+}
+
+function enhanceSelectControl(select: HTMLSelectElement): void {
+  const parent = select.parentElement;
+  if (!parent) {
+    return;
+  }
+
+  const container = document.createElement("div");
+  container.className = "custom-select-container";
+  parent.insertBefore(container, select);
+  container.appendChild(select);
+  select.dataset.customSelectNative = "true";
+  select.tabIndex = -1;
+
+  const trigger = document.createElement("div");
+  trigger.className = "select-trigger";
+  trigger.tabIndex = 0;
+  trigger.setAttribute("role", "button");
+  trigger.setAttribute("aria-haspopup", "listbox");
+  trigger.setAttribute("aria-expanded", "false");
+
+  const selectedText = document.createElement("span");
+  selectedText.className = "selected-text";
+
+  const arrow = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  arrow.setAttribute("class", "arrow");
+  arrow.setAttribute("viewBox", "0 0 20 20");
+  arrow.setAttribute("fill", "currentColor");
+  arrow.setAttribute("aria-hidden", "true");
+
+  const arrowPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  arrowPath.setAttribute("fill-rule", "evenodd");
+  arrowPath.setAttribute("d", "M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z");
+  arrowPath.setAttribute("clip-rule", "evenodd");
+  arrow.appendChild(arrowPath);
+
+  trigger.append(selectedText, arrow);
+
+  const optionsList = document.createElement("div");
+  optionsList.className = "options-list";
+  optionsList.setAttribute("role", "listbox");
+
+  container.append(trigger, optionsList);
+  customSelectInstances.set(select, {
+    container,
+    trigger,
+    selectedText,
+    optionsList,
+  });
+
+  trigger.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (select.disabled || select.options.length === 0) {
+      return;
+    }
+    toggleCustomSelect(select);
+  });
+
+  trigger.addEventListener("keydown", (event) => {
+    handleCustomSelectTriggerKeydown(event, select);
+  });
+
+  optionsList.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    const optionElement = target.closest<HTMLElement>(".option");
+    if (!optionElement || optionElement.classList.contains("disabled")) {
+      return;
+    }
+    const value = optionElement.dataset.value ?? "";
+    selectCustomOption(select, value);
+    closeCustomSelect(select);
+    trigger.focus();
+    event.stopPropagation();
+  });
+
+  select.addEventListener("change", () => {
+    syncCustomSelect(select);
+  });
+}
+
+function bindCustomSelectGlobalEvents(): void {
+  if (customSelectGlobalEventsBound) {
+    return;
+  }
+  customSelectGlobalEventsBound = true;
+
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Node)) {
+      closeAllCustomSelects();
+      return;
+    }
+    for (const instance of customSelectInstances.values()) {
+      if (instance.container.contains(target)) {
+        return;
+      }
+    }
+    closeAllCustomSelects();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") {
+      return;
+    }
+    closeAllCustomSelects();
+  });
+}
+
+function handleCustomSelectTriggerKeydown(event: KeyboardEvent, select: HTMLSelectElement): void {
+  if (select.disabled || select.options.length === 0) {
+    return;
+  }
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    toggleCustomSelect(select);
+    return;
+  }
+  if (event.key === "Escape") {
+    closeCustomSelect(select);
+    return;
+  }
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
+    return;
+  }
+  event.preventDefault();
+  const options = Array.from(select.options).filter((option) => !option.disabled);
+  if (options.length === 0) {
+    return;
+  }
+  const selectedIndex = options.findIndex((option) => option.value === select.value);
+  const offset = event.key === "ArrowDown" ? 1 : -1;
+  const nextIndex = selectedIndex === -1 ? 0 : (selectedIndex + offset + options.length) % options.length;
+  const nextValue = options[nextIndex].value;
+  selectCustomOption(select, nextValue);
+  openCustomSelect(select);
+}
+
+function syncAllCustomSelects(): void {
+  for (const select of customSelectInstances.keys()) {
+    syncCustomSelect(select);
+  }
+}
+
+function syncCustomSelect(select: HTMLSelectElement): void {
+  const instance = customSelectInstances.get(select);
+  if (!instance) {
+    return;
+  }
+
+  instance.optionsList.innerHTML = "";
+  for (const option of Array.from(select.options)) {
+    const optionElement = document.createElement("div");
+    optionElement.className = "option";
+    optionElement.dataset.value = option.value;
+    optionElement.textContent = option.textContent ?? "";
+    optionElement.setAttribute("role", "option");
+    optionElement.setAttribute("aria-selected", String(option.selected));
+    if (option.disabled) {
+      optionElement.classList.add("disabled");
+      optionElement.setAttribute("aria-disabled", "true");
+    }
+    if (option.selected) {
+      optionElement.classList.add("selected");
+    }
+    instance.optionsList.appendChild(optionElement);
+  }
+
+  const selectedOption = Array.from(select.selectedOptions)[0] ?? select.options[select.selectedIndex] ?? select.options[0];
+  instance.selectedText.textContent = selectedOption?.textContent?.trim() || "";
+  instance.container.classList.toggle("is-disabled", select.disabled);
+  instance.trigger.setAttribute("aria-disabled", String(select.disabled));
+  instance.trigger.tabIndex = select.disabled ? -1 : 0;
+
+  if (select.disabled || select.options.length === 0) {
+    closeCustomSelect(select);
+  }
+}
+
+function selectCustomOption(select: HTMLSelectElement, value: string): void {
+  const nextValue = value.trim();
+  if (select.value === nextValue) {
+    syncCustomSelect(select);
+    return;
+  }
+  select.value = nextValue;
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function toggleCustomSelect(select: HTMLSelectElement): void {
+  const instance = customSelectInstances.get(select);
+  if (!instance) {
+    return;
+  }
+  const nextOpen = !instance.container.classList.contains("open");
+  if (nextOpen) {
+    openCustomSelect(select);
+    return;
+  }
+  closeCustomSelect(select);
+}
+
+function openCustomSelect(select: HTMLSelectElement): void {
+  const instance = customSelectInstances.get(select);
+  if (!instance) {
+    return;
+  }
+  closeAllCustomSelects(select);
+  instance.container.classList.add("open");
+  instance.trigger.setAttribute("aria-expanded", "true");
+}
+
+function closeCustomSelect(select: HTMLSelectElement): void {
+  const instance = customSelectInstances.get(select);
+  if (!instance) {
+    return;
+  }
+  instance.container.classList.remove("open");
+  instance.trigger.setAttribute("aria-expanded", "false");
+}
+
+function closeAllCustomSelects(except?: HTMLSelectElement): void {
+  for (const [select, instance] of customSelectInstances.entries()) {
+    if (select === except) {
+      continue;
+    }
+    instance.container.classList.remove("open");
+    instance.trigger.setAttribute("aria-expanded", "false");
+  }
+}
+
 function isSettingsPopoverOpen(): boolean {
   return !settingsPopover.classList.contains("is-hidden");
 }
@@ -663,12 +1060,46 @@ function setSettingsPopoverOpen(open: boolean): void {
   settingsPopover.classList.toggle("is-hidden", !open);
   settingsPopover.setAttribute("aria-hidden", String(!open));
   settingsToggleButton.setAttribute("aria-expanded", String(open));
+  document.body.classList.toggle("settings-open", open);
+}
+
+function isWorkspaceEditorModalOpen(): boolean {
+  return !workspaceEditorModal.classList.contains("is-hidden");
+}
+
+function setWorkspaceEditorModalOpen(open: boolean): void {
+  workspaceEditorModal.classList.toggle("is-hidden", !open);
+  workspaceEditorModal.setAttribute("aria-hidden", String(!open));
+  document.body.classList.toggle("workspace-editor-open", open);
+}
+
+function isWorkspaceImportModalOpen(): boolean {
+  return !workspaceImportModal.classList.contains("is-hidden");
+}
+
+function setWorkspaceImportModalOpen(open: boolean): void {
+  workspaceImportModal.classList.toggle("is-hidden", !open);
+  workspaceImportModal.setAttribute("aria-hidden", String(!open));
+  workspaceImportOpenButton.setAttribute("aria-expanded", String(open));
+  document.body.classList.toggle("workspace-import-open", open);
+}
+
+function isCronCreateModalOpen(): boolean {
+  return !cronCreateModal.classList.contains("is-hidden");
+}
+
+function setCronCreateModalOpen(open: boolean): void {
+  cronCreateModal.classList.toggle("is-hidden", !open);
+  cronCreateModal.setAttribute("aria-hidden", String(!open));
+  cronCreateOpenButton.setAttribute("aria-expanded", String(open));
+  document.body.classList.toggle("cron-create-open", open);
 }
 
 function initLocale(): void {
   const savedLocale = localStorage.getItem(LOCALE_KEY);
   const locale = setLocale(savedLocale ?? navigator.language ?? DEFAULT_LOCALE);
   localeSelect.value = locale;
+  syncCustomSelect(localeSelect);
 }
 
 function applyLocaleToDocument(): void {
@@ -710,6 +1141,7 @@ function applyLocaleToDocument(): void {
     renderEnvsPanel();
   }
   if (state.tabLoaded.workspace) {
+    renderQQChannelConfig();
     renderWorkspaceFiles();
     renderWorkspaceEditor();
   }
@@ -717,6 +1149,7 @@ function applyLocaleToDocument(): void {
     renderCronJobs();
   }
   syncCronDispatchHint();
+  syncAllCustomSelects();
 }
 
 async function handleControlChange(resetDraft: boolean): Promise<void> {
@@ -745,6 +1178,13 @@ async function syncModelStateOnBoot(): Promise<void> {
 async function switchTab(tab: TabKey): Promise<void> {
   if (state.activeTab === tab) {
     return;
+  }
+  if (tab !== "workspace") {
+    setWorkspaceEditorModalOpen(false);
+    setWorkspaceImportModalOpen(false);
+  }
+  if (tab !== "cron") {
+    setCronCreateModalOpen(false);
   }
   state.activeTab = tab;
   renderTabPanels();
@@ -886,14 +1326,13 @@ function startDraftSession(): void {
   state.activeChatId = null;
   state.activeSessionId = newSessionID();
   state.messages = [];
-  state.agentEvents = [];
   renderChatHeader();
   renderChatList();
   renderMessages();
-  renderAgentEvents();
 }
 
 async function sendMessage(): Promise<void> {
+  await bootstrapTask;
   syncControlState();
   if (state.sending) {
     return;
@@ -921,21 +1360,34 @@ async function sendMessage(): Promise<void> {
   state.sending = true;
   sendButton.disabled = true;
   const assistantID = `assistant-${Date.now()}`;
-  state.agentEvents = [];
-  renderAgentEvents();
 
   state.messages = state.messages.concat(
     {
       id: `user-${Date.now()}`,
       role: "user",
       text: inputText,
+      toolCalls: [],
+      textOrder: nextMessageOutputOrder(),
+      timeline: [],
     },
     {
       id: assistantID,
       role: "assistant",
       text: "",
+      toolCalls: [],
+      timeline: [],
     },
   );
+  const latestUserMessage = state.messages[state.messages.length - 2];
+  if (latestUserMessage && latestUserMessage.role === "user" && latestUserMessage.textOrder !== undefined) {
+    latestUserMessage.timeline = [
+      {
+        type: "text",
+        order: latestUserMessage.textOrder,
+        text: latestUserMessage.text,
+      },
+    ];
+  }
   renderMessages();
   messageInput.value = "";
   setStatus(t("status.streamingReply"), "info");
@@ -949,11 +1401,11 @@ async function sendMessage(): Promise<void> {
         if (!target) {
           return;
         }
-        target.text += delta;
-        renderMessages();
+        appendAssistantDelta(target, delta);
+        renderMessageInPlace(assistantID);
       },
       (event) => {
-        pushAgentEvent(event);
+        handleToolCallEvent(event, assistantID);
       },
     );
     setStatus(t("status.replyCompleted"), "info");
@@ -966,7 +1418,10 @@ async function sendMessage(): Promise<void> {
         chat.channel === state.channel,
     );
     if (matched) {
-      await openChat(matched.id);
+      state.activeChatId = matched.id;
+      state.activeSessionId = matched.session_id;
+      renderChatHeader();
+      renderChatList();
     }
   } catch (error) {
     setStatus(asErrorMessage(error), "error");
@@ -1094,19 +1549,35 @@ function consumeSSEBlock(block: string, onDelta: (delta: string) => void, onEven
   if (data === "[DONE]") {
     return true;
   }
+  let payload: AgentStreamEvent;
   try {
-    const payload = JSON.parse(data) as AgentStreamEvent;
-    if (typeof payload.type === "string" && onEvent) {
-      onEvent(payload);
-    }
-    if (typeof payload.delta === "string") {
-      onDelta(payload.delta);
-    }
-    return false;
+    payload = JSON.parse(data) as AgentStreamEvent;
   } catch {
     onDelta(data);
     return false;
   }
+  payload.raw = data;
+  if (payload.type === "error") {
+    if (onEvent) {
+      onEvent(payload);
+    }
+    const message = typeof payload.meta?.message === "string" ? payload.meta.message.trim() : "";
+    const code = typeof payload.meta?.code === "string" ? payload.meta.code.trim() : "";
+    if (code !== "" && message !== "") {
+      throw new Error(`${code}: ${message}`);
+    }
+    if (message !== "") {
+      throw new Error(message);
+    }
+    throw new Error(t("error.sseUnexpectedError"));
+  }
+  if (typeof payload.type === "string" && onEvent) {
+    onEvent(payload);
+  }
+  if (typeof payload.delta === "string") {
+    onDelta(payload.delta);
+  }
+  return false;
 }
 
 function renderChatList(): void {
@@ -1170,71 +1641,293 @@ function renderMessages(): void {
   for (const message of state.messages) {
     const item = document.createElement("li");
     item.className = `message ${message.role}`;
-    item.textContent = message.text || (message.role === "assistant" ? t("common.ellipsis") : "");
+    item.dataset.messageId = message.id;
+    renderMessageNode(item, message);
     messageList.appendChild(item);
   }
   messageList.scrollTop = messageList.scrollHeight;
 }
 
-function pushAgentEvent(event: AgentStreamEvent): void {
-  const text = formatAgentEvent(event);
-  if (text === "") {
+function renderMessageInPlace(messageID: string): void {
+  const target = state.messages.find((item) => item.id === messageID);
+  if (!target) {
     return;
   }
-  state.agentEvents = state.agentEvents.concat({
-    id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    text,
+  const items = Array.from(messageList.querySelectorAll<HTMLLIElement>(".message"));
+  const node = items.find((item) => item.dataset.messageId === messageID);
+  if (!node) {
+    renderMessages();
+    return;
+  }
+  renderMessageNode(node, target);
+  messageList.scrollTop = messageList.scrollHeight;
+}
+
+function nextMessageOutputOrder(): number {
+  state.messageOutputOrder += 1;
+  return state.messageOutputOrder;
+}
+
+function handleToolCallEvent(event: AgentStreamEvent, assistantID: string): void {
+  if (event.type !== "tool_call") {
+    return;
+  }
+  const notice = formatToolCallNotice(event);
+  if (!notice) {
+    return;
+  }
+  appendToolCallNoticeToAssistant(assistantID, notice);
+}
+
+function appendToolCallNoticeToAssistant(assistantID: string, notice: ViewToolCallNotice): void {
+  const target = state.messages.find((item) => item.id === assistantID);
+  if (!target) {
+    return;
+  }
+  if (notice.summary === "" || notice.raw === "") {
+    return;
+  }
+  const order = nextMessageOutputOrder();
+  const noticeWithOrder: ViewToolCallNotice = {
+    ...notice,
+    order,
+  };
+  if (target.toolOrder === undefined) {
+    target.toolOrder = order;
+  }
+  target.toolCalls = target.toolCalls.concat(noticeWithOrder);
+  target.timeline = target.timeline.concat({
+    type: "tool_call",
+    order,
+    toolCall: noticeWithOrder,
   });
-  if (state.agentEvents.length > 120) {
-    state.agentEvents = state.agentEvents.slice(state.agentEvents.length - 120);
-  }
-  renderAgentEvents();
+  renderMessageInPlace(assistantID);
 }
 
-function renderAgentEvents(): void {
-  agentEventList.innerHTML = "";
-  if (state.agentEvents.length === 0) {
-    const empty = document.createElement("li");
-    empty.className = "message-empty";
-    empty.textContent = t("chat.emptyEvents");
-    agentEventList.appendChild(empty);
+function appendAssistantDelta(message: ViewMessage, delta: string): void {
+  if (delta === "") {
     return;
   }
-  for (const event of state.agentEvents) {
-    const item = document.createElement("li");
-    item.className = "agent-event-item";
-    item.textContent = event.text;
-    agentEventList.appendChild(item);
+  if (message.textOrder === undefined) {
+    message.textOrder = nextMessageOutputOrder();
   }
-  agentEventList.scrollTop = agentEventList.scrollHeight;
+  message.text += delta;
+
+  const timeline = message.timeline;
+  const last = timeline[timeline.length - 1];
+  if (last && last.type === "text") {
+    last.text = `${last.text ?? ""}${delta}`;
+    return;
+  }
+  const order = nextMessageOutputOrder();
+  timeline.push({
+    type: "text",
+    order,
+    text: delta,
+  });
 }
 
-function formatAgentEvent(event: AgentStreamEvent): string {
-  const stepText = typeof event.step === "number" ? String(event.step) : "-";
-  switch (event.type) {
-    case "step_started":
-      return t("chat.eventStepStarted", { step: stepText });
-    case "tool_call":
-      return t("chat.eventToolCall", {
-        step: stepText,
-        name: event.tool_call?.name ?? "unknown",
-      });
-    case "tool_result":
-      return t("chat.eventToolResult", {
-        step: stepText,
-        name: event.tool_result?.name ?? "unknown",
-        summary: event.tool_result?.summary ?? "",
-      });
-    case "assistant_delta":
-      return "";
-    case "completed":
-      return t("chat.eventCompleted", { step: stepText });
-    default:
-      if (typeof event.type === "string" && event.type !== "") {
-        return t("chat.eventGeneric", { type: event.type, step: stepText });
-      }
-      return "";
+function formatToolCallNotice(event: AgentStreamEvent): ViewToolCallNotice | null {
+  const raw = formatToolCallRaw(event);
+  if (raw === "") {
+    return null;
   }
+  return {
+    summary: formatToolCallSummary(event.tool_call),
+    raw,
+  };
+}
+
+function formatToolCallRaw(event: AgentStreamEvent): string {
+  const raw = typeof event.raw === "string" ? event.raw.trim() : "";
+  if (raw !== "") {
+    return raw;
+  }
+  if (event.tool_call) {
+    try {
+      return JSON.stringify({
+        type: "tool_call",
+        step: event.step,
+        tool_call: event.tool_call,
+      });
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+function formatToolCallSummary(toolCall?: AgentToolCallPayload): string {
+  const name = typeof toolCall?.name === "string" ? toolCall.name.trim() : "";
+  if (name === "shell") {
+    const command = extractShellCommand(toolCall?.input);
+    return command === "" ? "bash" : `bash ${command}`;
+  }
+  if (name === "view") {
+    const filePath = extractToolFilePath(toolCall?.input);
+    if (filePath !== "") {
+      return t("chat.toolCallViewPath", { path: filePath });
+    }
+    return t("chat.toolCallView");
+  }
+  if (name === "edit" || name === "exit") {
+    const filePath = extractToolFilePath(toolCall?.input);
+    if (filePath !== "") {
+      return t("chat.toolCallEditPath", { path: filePath });
+    }
+    return t("chat.toolCallEdit");
+  }
+  return t("chat.toolCallNotice", { target: name || "tool" });
+}
+
+function extractToolFilePath(input?: Record<string, unknown>): string {
+  if (!input || typeof input !== "object") {
+    return "";
+  }
+  const directPath = input.path;
+  if (typeof directPath === "string" && directPath.trim() !== "") {
+    return directPath.trim();
+  }
+  const nested = input.input;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    const nestedPath = extractToolFilePath(nested as Record<string, unknown>);
+    if (nestedPath !== "") {
+      return nestedPath;
+    }
+  }
+  const items = input.items;
+  if (!Array.isArray(items)) {
+    return "";
+  }
+  for (const item of items) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      continue;
+    }
+    const path = (item as { path?: unknown }).path;
+    if (typeof path === "string" && path.trim() !== "") {
+      return path.trim();
+    }
+  }
+  return "";
+}
+
+function extractShellCommand(input?: Record<string, unknown>): string {
+  if (!input || typeof input !== "object") {
+    return "";
+  }
+  const direct = input.command;
+  if (typeof direct === "string" && direct.trim() !== "") {
+    return direct.trim();
+  }
+  const items = input.items;
+  if (!Array.isArray(items) || items.length === 0) {
+    return "";
+  }
+  const first = items[0];
+  if (!first || typeof first !== "object" || Array.isArray(first)) {
+    return "";
+  }
+  const command = (first as { command?: unknown }).command;
+  if (typeof command !== "string") {
+    return "";
+  }
+  return command.trim();
+}
+
+function renderMessageNode(node: HTMLLIElement, message: ViewMessage): void {
+  node.innerHTML = "";
+
+  const orderedTimeline = buildOrderedTimeline(message);
+  if (orderedTimeline.length === 0) {
+    if (message.role === "assistant") {
+      const placeholder = document.createElement("div");
+      placeholder.className = "message-text";
+      placeholder.textContent = t("common.ellipsis");
+      node.appendChild(placeholder);
+    }
+    return;
+  }
+
+  for (const entry of orderedTimeline) {
+    if (entry.type === "text") {
+      const textValue = entry.text ?? "";
+      if (textValue === "") {
+        continue;
+      }
+      const text = document.createElement("div");
+      text.className = "message-text";
+      text.textContent = textValue;
+      node.appendChild(text);
+      continue;
+    }
+
+    const toolCall = entry.toolCall;
+    if (!toolCall) {
+      continue;
+    }
+    const toolCallList = document.createElement("div");
+    toolCallList.className = "tool-call-list";
+
+    const details = document.createElement("details");
+    details.className = "tool-call-entry";
+
+    const summary = document.createElement("summary");
+    summary.className = "tool-call-summary";
+    summary.textContent = toolCall.summary;
+
+    const raw = document.createElement("pre");
+    raw.className = "tool-call-raw";
+    raw.textContent = toolCall.raw;
+
+    details.append(summary, raw);
+    toolCallList.appendChild(details);
+    node.appendChild(toolCallList);
+  }
+}
+
+function buildOrderedTimeline(message: ViewMessage): ViewMessageTimelineEntry[] {
+  const fromTimeline = normalizeTimeline(message.timeline);
+  if (fromTimeline.length > 0) {
+    return fromTimeline;
+  }
+
+  const fallback: ViewMessageTimelineEntry[] = [];
+  if (message.text !== "") {
+    fallback.push({
+      type: "text",
+      order: message.textOrder ?? Number.MAX_SAFE_INTEGER - 1,
+      text: message.text,
+    });
+  }
+  for (const toolCall of message.toolCalls) {
+    fallback.push({
+      type: "tool_call",
+      order: toolCall.order ?? message.toolOrder ?? Number.MAX_SAFE_INTEGER,
+      toolCall,
+    });
+  }
+  return normalizeTimeline(fallback);
+}
+
+function normalizeTimeline(entries: ViewMessageTimelineEntry[]): ViewMessageTimelineEntry[] {
+  const normalized = entries
+    .filter((entry) => entry.order > 0)
+    .slice()
+    .sort((left, right) => left.order - right.order);
+  if (normalized.length < 2) {
+    return normalized;
+  }
+
+  const merged: ViewMessageTimelineEntry[] = [];
+  for (const entry of normalized) {
+    const last = merged[merged.length - 1];
+    if (entry.type === "text" && last && last.type === "text") {
+      last.text = `${last.text ?? ""}${entry.text ?? ""}`;
+      continue;
+    }
+    merged.push({ ...entry });
+  }
+  return merged;
 }
 
 async function refreshModels(): Promise<void> {
@@ -1457,6 +2150,7 @@ function renderActiveModelEditor(): void {
       providerId: t("common.none"),
       model: t("common.none"),
     });
+    syncAllCustomSelects();
     return;
   }
 
@@ -1477,6 +2171,7 @@ function renderActiveModelEditor(): void {
     providerId: state.activeLLM.provider_id || t("common.none"),
     model: state.activeLLM.model || t("common.none"),
   });
+  syncAllCustomSelects();
 }
 
 function renderActiveProviderOptions(): void {
@@ -1486,6 +2181,7 @@ function renderActiveProviderOptions(): void {
     emptyOption.value = "";
     emptyOption.textContent = t("models.noProviderOption");
     modelsActiveProviderSelect.appendChild(emptyOption);
+    syncCustomSelect(modelsActiveProviderSelect);
     return;
   }
 
@@ -1495,6 +2191,7 @@ function renderActiveProviderOptions(): void {
     option.textContent = formatProviderLabel(provider);
     modelsActiveProviderSelect.appendChild(option);
   }
+  syncCustomSelect(modelsActiveProviderSelect);
 }
 
 function renderActiveModelOptions(providerID: string, preferredModel = ""): void {
@@ -1507,6 +2204,7 @@ function renderActiveModelOptions(providerID: string, preferredModel = ""): void
     emptyOption.textContent = t("models.noModelOption");
     modelsActiveModelSelect.appendChild(emptyOption);
     modelsActiveModelSelect.disabled = true;
+    syncCustomSelect(modelsActiveModelSelect);
     return;
   }
 
@@ -1524,6 +2222,7 @@ function renderActiveModelOptions(providerID: string, preferredModel = ""): void
   const selected = hasPreferred ? preferred : hasFallback ? fallback : models[0].id;
   modelsActiveModelSelect.value = selected;
   modelsActiveModelSelect.disabled = false;
+  syncCustomSelect(modelsActiveModelSelect);
 }
 
 async function setActiveModel(): Promise<void> {
@@ -1565,6 +2264,7 @@ function renderProviderTypeOptions(selectedType?: string): void {
   const options = state.providerTypes.length > 0 ? state.providerTypes : fallbackProviderTypes(state.providers);
   if (options.length === 0) {
     modelsProviderTypeSelect.innerHTML = "";
+    syncCustomSelect(modelsProviderTypeSelect);
     return;
   }
   const requestedType = normalizeProviderTypeValue(selectedType ?? modelsProviderTypeSelect.value);
@@ -1584,6 +2284,7 @@ function renderProviderTypeOptions(selectedType?: string): void {
     modelsProviderTypeSelect.appendChild(selectedOption);
   }
   modelsProviderTypeSelect.value = activeType;
+  syncCustomSelect(modelsProviderTypeSelect);
 }
 
 function normalizeProviderTypeValue(value: string): string {
@@ -2125,9 +2826,139 @@ async function deleteEnv(key: string): Promise<void> {
   }
 }
 
+function defaultQQChannelConfig(): QQChannelConfig {
+  return {
+    enabled: false,
+    app_id: "",
+    client_secret: "",
+    bot_prefix: "",
+    target_type: "c2c",
+    target_id: "",
+    api_base: DEFAULT_QQ_API_BASE,
+    token_url: DEFAULT_QQ_TOKEN_URL,
+    timeout_seconds: DEFAULT_QQ_TIMEOUT_SECONDS,
+  };
+}
+
+function normalizeQQTargetType(raw: unknown): QQTargetType {
+  const value = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  if (value === "group") {
+    return "group";
+  }
+  if (value === "guild" || value === "channel" || value === "dm") {
+    return "guild";
+  }
+  return "c2c";
+}
+
+function normalizeQQChannelConfig(raw: unknown): QQChannelConfig {
+  const fallback = defaultQQChannelConfig();
+  const parsed = toRecord(raw);
+  if (!parsed) {
+    return fallback;
+  }
+  return {
+    enabled: parsed.enabled === true || parsed.enabled === "true" || parsed.enabled === 1,
+    app_id: typeof parsed.app_id === "string" ? parsed.app_id.trim() : "",
+    client_secret: typeof parsed.client_secret === "string" ? parsed.client_secret.trim() : "",
+    bot_prefix: typeof parsed.bot_prefix === "string" ? parsed.bot_prefix : "",
+    target_type: normalizeQQTargetType(parsed.target_type),
+    target_id: typeof parsed.target_id === "string" ? parsed.target_id.trim() : "",
+    api_base: typeof parsed.api_base === "string" && parsed.api_base.trim() !== "" ? parsed.api_base.trim() : fallback.api_base,
+    token_url: typeof parsed.token_url === "string" && parsed.token_url.trim() !== "" ? parsed.token_url.trim() : fallback.token_url,
+    timeout_seconds: parseIntegerInput(String(parsed.timeout_seconds ?? ""), fallback.timeout_seconds, 1),
+  };
+}
+
+function renderQQChannelConfig(): void {
+  const cfg = state.qqChannelConfig;
+  const available = state.qqChannelAvailable;
+
+  qqChannelEnabledInput.checked = cfg.enabled;
+  qqChannelAppIDInput.value = cfg.app_id;
+  qqChannelClientSecretInput.value = cfg.client_secret;
+  qqChannelBotPrefixInput.value = cfg.bot_prefix;
+  qqChannelTargetTypeSelect.value = cfg.target_type;
+  qqChannelTargetIDInput.value = cfg.target_id;
+  qqChannelAPIBaseInput.value = cfg.api_base;
+  qqChannelTokenURLInput.value = cfg.token_url;
+  qqChannelTimeoutSecondsInput.value = String(cfg.timeout_seconds);
+
+  const controls: Array<HTMLInputElement | HTMLSelectElement | HTMLButtonElement> = [
+    qqChannelEnabledInput,
+    qqChannelAppIDInput,
+    qqChannelClientSecretInput,
+    qqChannelBotPrefixInput,
+    qqChannelTargetTypeSelect,
+    qqChannelTargetIDInput,
+    qqChannelAPIBaseInput,
+    qqChannelTokenURLInput,
+    qqChannelTimeoutSecondsInput,
+  ];
+  for (const control of controls) {
+    control.disabled = !available;
+  }
+  syncCustomSelect(qqChannelTargetTypeSelect);
+}
+
+async function refreshQQChannelConfig(options: { silent?: boolean } = {}): Promise<void> {
+  try {
+    const raw = await requestJSON<unknown>("/config/channels/qq");
+    state.qqChannelConfig = normalizeQQChannelConfig(raw);
+    state.qqChannelAvailable = true;
+    renderQQChannelConfig();
+    if (!options.silent) {
+      setStatus(t("status.qqChannelLoaded"), "info");
+    }
+  } catch (error) {
+    state.qqChannelConfig = defaultQQChannelConfig();
+    state.qqChannelAvailable = false;
+    renderQQChannelConfig();
+    if (!options.silent) {
+      setStatus(asErrorMessage(error), "error");
+    }
+  }
+}
+
+function collectQQChannelFormConfig(): QQChannelConfig {
+  return {
+    enabled: qqChannelEnabledInput.checked,
+    app_id: qqChannelAppIDInput.value.trim(),
+    client_secret: qqChannelClientSecretInput.value.trim(),
+    bot_prefix: qqChannelBotPrefixInput.value,
+    target_type: normalizeQQTargetType(qqChannelTargetTypeSelect.value),
+    target_id: qqChannelTargetIDInput.value.trim(),
+    api_base: qqChannelAPIBaseInput.value.trim() || DEFAULT_QQ_API_BASE,
+    token_url: qqChannelTokenURLInput.value.trim() || DEFAULT_QQ_TOKEN_URL,
+    timeout_seconds: parseIntegerInput(qqChannelTimeoutSecondsInput.value, DEFAULT_QQ_TIMEOUT_SECONDS, 1),
+  };
+}
+
+async function saveQQChannelConfig(): Promise<void> {
+  syncControlState();
+  if (!state.qqChannelAvailable) {
+    setStatus(t("error.qqChannelUnavailable"), "error");
+    return;
+  }
+  const payload = collectQQChannelFormConfig();
+  try {
+    const out = await requestJSON<unknown>("/config/channels/qq", {
+      method: "PUT",
+      body: payload,
+    });
+    state.qqChannelConfig = normalizeQQChannelConfig(out ?? payload);
+    state.qqChannelAvailable = true;
+    renderQQChannelConfig();
+    setStatus(t("status.qqChannelSaved"), "info");
+  } catch (error) {
+    setStatus(asErrorMessage(error), "error");
+  }
+}
+
 async function refreshWorkspace(options: { silent?: boolean } = {}): Promise<void> {
   syncControlState();
   try {
+    await refreshQQChannelConfig({ silent: true });
     const files = await listWorkspaceFiles();
     state.workspaceFiles = files;
     if (state.activeWorkspacePath !== "" && !files.some((file) => file.path === state.activeWorkspacePath)) {
@@ -2215,6 +3046,7 @@ async function createWorkspaceFile(): Promise<void> {
     state.activeWorkspacePath = path;
     state.activeWorkspaceContent = JSON.stringify(createWorkspaceSkillTemplate(path), null, 2);
     await refreshWorkspace({ silent: true });
+    setWorkspaceEditorModalOpen(true);
     setStatus(t("status.workspaceFileCreated", { path }), "info");
   } catch (error) {
     setStatus(asWorkspaceErrorMessage(error), "error");
@@ -2229,6 +3061,7 @@ async function openWorkspaceFile(path: string, options: { silent?: boolean } = {
     state.activeWorkspaceContent = JSON.stringify(payload, null, 2);
     renderWorkspaceFiles();
     renderWorkspaceEditor();
+    setWorkspaceEditorModalOpen(true);
     if (!options.silent) {
       setStatus(t("status.workspaceFileLoaded", { path }), "info");
     }
@@ -2282,17 +3115,6 @@ async function deleteWorkspaceFile(path: string): Promise<void> {
   }
 }
 
-async function exportWorkspaceJSON(): Promise<void> {
-  syncControlState();
-  try {
-    const raw = await requestJSON<unknown>("/workspace/export");
-    workspaceJSONInput.value = stringifyWorkspaceExport(raw);
-    setStatus(t("status.workspaceExportReady"), "info");
-  } catch (error) {
-    setStatus(asWorkspaceErrorMessage(error), "error");
-  }
-}
-
 async function importWorkspaceJSON(): Promise<void> {
   syncControlState();
   const raw = workspaceJSONInput.value.trim();
@@ -2322,6 +3144,7 @@ async function importWorkspaceJSON(): Promise<void> {
     });
     clearWorkspaceSelection();
     await refreshWorkspace({ silent: true });
+    setWorkspaceImportModalOpen(false);
     setStatus(t("status.workspaceImportDone"), "info");
   } catch (error) {
     setStatus(asWorkspaceErrorMessage(error), "error");
@@ -2418,17 +3241,6 @@ function normalizeWorkspaceFiles(raw: unknown): WorkspaceFileInfo[] {
 function clearWorkspaceSelection(): void {
   state.activeWorkspacePath = "";
   state.activeWorkspaceContent = "";
-}
-
-function stringifyWorkspaceExport(raw: unknown): string {
-  if (typeof raw === "string") {
-    try {
-      return JSON.stringify(JSON.parse(raw), null, 2);
-    } catch {
-      return raw;
-    }
-  }
-  return JSON.stringify(raw ?? {}, null, 2);
 }
 
 function normalizeWorkspaceInputPath(path: string): string {
@@ -2551,7 +3363,7 @@ function renderCronJobs(): void {
   });
 }
 
-async function createCronJob(): Promise<void> {
+async function createCronJob(): Promise<boolean> {
   syncControlState();
 
   const id = cronIDInput.value.trim();
@@ -2562,19 +3374,19 @@ async function createCronJob(): Promise<void> {
 
   if (id === "" || name === "") {
     setStatus(t("error.cronIdNameRequired"), "error");
-    return;
+    return false;
   }
   if (intervalText === "") {
     setStatus(t("error.cronScheduleRequired"), "error");
-    return;
+    return false;
   }
   if (sessionID === "") {
     setStatus(t("error.cronSessionRequired"), "error");
-    return;
+    return false;
   }
   if (text === "") {
     setStatus(t("error.cronTextRequired"), "error");
-    return;
+    return false;
   }
 
   const maxConcurrency = parseIntegerInput(cronMaxConcurrencyInput.value, 1, 1);
@@ -2617,8 +3429,10 @@ async function createCronJob(): Promise<void> {
     });
     await refreshCronJobs();
     setStatus(t("status.cronCreated", { jobId: id }), "info");
+    return true;
   } catch (error) {
     setStatus(asErrorMessage(error), "error");
+    return false;
   }
 }
 
@@ -2854,16 +3668,144 @@ function setStatus(message: string, tone: Tone = "neutral"): void {
   }
 }
 
+function toRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function parsePositiveInteger(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const n = Math.trunc(value);
+    return n > 0 ? n : undefined;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value.trim(), 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+function buildToolCallNoticeFromRaw(raw: string): ViewToolCallNotice | null {
+  const normalized = raw.trim();
+  if (normalized === "") {
+    return null;
+  }
+  let summary = t("chat.toolCallNotice", { target: "tool" });
+  try {
+    const payload = JSON.parse(normalized) as AgentStreamEvent;
+    summary = formatToolCallSummary(payload.tool_call);
+  } catch {
+    // ignore invalid raw payload and keep fallback summary
+  }
+  return {
+    summary,
+    raw: normalized,
+  };
+}
+
+function parsePersistedToolCallNotices(metadata: Record<string, unknown> | null): ViewToolCallNotice[] {
+  if (!metadata) {
+    return [];
+  }
+  const raw = metadata.tool_call_notices;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const notices: ViewToolCallNotice[] = [];
+  for (const item of raw) {
+    if (typeof item === "string") {
+      const notice = buildToolCallNoticeFromRaw(item);
+      if (notice) {
+        notices.push(notice);
+      }
+      continue;
+    }
+    const obj = toRecord(item);
+    if (!obj) {
+      continue;
+    }
+    const rawText = typeof obj.raw === "string" ? obj.raw : "";
+    const notice = buildToolCallNoticeFromRaw(rawText);
+    if (notice) {
+      const persistedOrder = parsePositiveInteger(obj.order);
+      if (persistedOrder !== undefined) {
+        notice.order = persistedOrder;
+      }
+      notices.push(notice);
+    }
+  }
+  return notices;
+}
+
 function toViewMessage(message: RuntimeMessage): ViewMessage {
   const joined = (message.content ?? [])
     .map((item) => item.text ?? "")
     .join("")
     .trim();
+  const metadata = toRecord(message.metadata);
+  const toolCalls = parsePersistedToolCallNotices(metadata);
+  const persistedTextOrder = parsePositiveInteger(metadata?.text_order);
+  const persistedToolOrder = parsePositiveInteger(metadata?.tool_order);
+  const textOrder = joined === "" ? undefined : (persistedTextOrder ?? nextMessageOutputOrder());
+  const orderedToolCalls = withResolvedToolCallOrder(toolCalls, persistedToolOrder);
+  const toolOrder = orderedToolCalls.length === 0 ? undefined : orderedToolCalls[0].order;
+  const timeline: ViewMessageTimelineEntry[] = [];
+  if (joined !== "" && textOrder !== undefined) {
+    timeline.push({
+      type: "text",
+      order: textOrder,
+      text: joined,
+    });
+  }
+  for (const toolCall of orderedToolCalls) {
+    timeline.push({
+      type: "tool_call",
+      order: toolCall.order ?? nextMessageOutputOrder(),
+      toolCall,
+    });
+  }
   return {
     id: message.id || `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     role: message.role === "user" ? "user" : "assistant",
     text: joined,
+    toolCalls: orderedToolCalls,
+    textOrder,
+    toolOrder,
+    timeline,
   };
+}
+
+function withResolvedToolCallOrder(toolCalls: ViewToolCallNotice[], persistedToolOrder?: number): ViewToolCallNotice[] {
+  if (toolCalls.length === 0) {
+    return [];
+  }
+  const resolved: ViewToolCallNotice[] = [];
+  let cursor = persistedToolOrder;
+  for (const toolCall of toolCalls) {
+    const parsedOrder = parsePositiveInteger(toolCall.order);
+    if (parsedOrder !== undefined) {
+      cursor = parsedOrder;
+      resolved.push({
+        ...toolCall,
+        order: parsedOrder,
+      });
+      continue;
+    }
+    if (cursor === undefined) {
+      cursor = nextMessageOutputOrder();
+    } else {
+      cursor += 1;
+    }
+    resolved.push({
+      ...toolCall,
+      order: cursor,
+    });
+  }
+  return resolved;
 }
 
 function toAbsoluteURL(path: string): string {

@@ -207,8 +207,5 @@ describe("web e2e: set active model then send chat", () => {
     expect(text).toContain(replies.model);
     expect(text).not.toContain("Echo:");
     expect(processCalled).toBe(true);
-
-    const eventItems = Array.from(document.querySelectorAll<HTMLLIElement>("#agent-event-list .agent-event-item"));
-    expect(eventItems.length).toBeGreaterThan(0);
   });
 });
