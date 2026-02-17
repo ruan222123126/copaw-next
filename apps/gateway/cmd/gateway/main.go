@@ -5,8 +5,8 @@ import (
 	"log"
 	"net/http"
 
-	"copaw-next/apps/gateway/internal/app"
-	"copaw-next/apps/gateway/internal/config"
+	"nextai/apps/gateway/internal/app"
+	"nextai/apps/gateway/internal/config"
 )
 
 func main() {

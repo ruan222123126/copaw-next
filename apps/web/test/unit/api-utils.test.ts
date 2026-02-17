@@ -23,9 +23,9 @@ describe("parseErrorMessage", () => {
 
 describe("parseEnvMap", () => {
   it("parses valid env map", () => {
-    expect(parseEnvMap('{"OPENAI_API_KEY":"sk-xxx","COPAW_MODE":"dev"}')).toEqual({
+    expect(parseEnvMap('{"OPENAI_API_KEY":"sk-xxx","NEXTAI_MODE":"dev"}')).toEqual({
       OPENAI_API_KEY: "sk-xxx",
-      COPAW_MODE: "dev",
+      NEXTAI_MODE: "dev",
     });
   });
 

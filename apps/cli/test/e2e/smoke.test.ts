@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Command } from "commander";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -13,12 +13,13 @@ import { registerEnvsCommand } from "../../src/commands/envs.js";
 import { registerSkillsCommand } from "../../src/commands/skills.js";
 import { registerWorkspaceCommand } from "../../src/commands/workspace.js";
 import { registerChannelsCommand } from "../../src/commands/channels.js";
+import { registerTUICommand, type StartTUIFn } from "../../src/commands/tui.js";
 import { printError, setOutputJSONMode } from "../../src/io/output.js";
 
-function buildProgram(client: ApiClient): Command {
+function buildProgram(client: ApiClient, startTUI?: StartTUIFn): Command {
   const program = new Command();
   program.exitOverride();
-  program.name("copaw").option("--json");
+  program.name("nextai").option("--json");
   program.hook("preAction", (thisCommand) => {
     setOutputJSONMode(Boolean(thisCommand.optsWithGlobals().json));
   });
@@ -31,10 +32,17 @@ function buildProgram(client: ApiClient): Command {
   registerSkillsCommand(program, client);
   registerWorkspaceCommand(program, client);
   registerChannelsCommand(program, client);
+  registerTUICommand(program, client, {
+    start: startTUI ?? (async () => {}),
+  });
   return program;
 }
 
-async function runCLI(argv: string[], fetchImpl: (url: string, init?: RequestInit) => Promise<Response>) {
+async function runCLI(
+  argv: string[],
+  fetchImpl: (url: string, init?: RequestInit) => Promise<Response>,
+  options?: { startTUI?: StartTUIFn },
+) {
   vi.stubGlobal("fetch", vi.fn(fetchImpl));
   setOutputJSONMode(false);
 
@@ -48,10 +56,10 @@ async function runCLI(argv: string[], fetchImpl: (url: string, init?: RequestIni
   });
 
   const client = new ApiClient("http://127.0.0.1:8088");
-  const program = buildProgram(client);
+  const program = buildProgram(client, options?.startTUI);
   let exitCode = 0;
   try {
-    await program.parseAsync(["node", "copaw", ...argv]);
+    await program.parseAsync(["node", "nextai", ...argv]);
   } catch (err) {
     exitCode = 1;
     printError(err);
@@ -89,18 +97,42 @@ describe("cli e2e", () => {
   });
 
   it("covers main command success paths with mocked gateway", async () => {
-    const calls: Array<{ method: string; url: string }> = [];
+    const calls: Array<{ method: string; url: string; body: string }> = [];
     const run = async (argv: string[]) =>
       runCLI(argv, async (url, init) => {
-        calls.push({ method: (init?.method ?? "GET").toUpperCase(), url: String(url) });
-        if (String(url).endsWith("/workspace/download")) {
-          return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+        const method = (init?.method ?? "GET").toUpperCase();
+        const body = typeof init?.body === "string" ? init.body : "";
+        calls.push({ method, url: String(url), body });
+        if (String(url).endsWith("/workspace/export")) {
+          return new Response(
+            JSON.stringify({
+              version: "v1",
+              skills: {},
+              config: {
+                envs: {},
+                channels: {},
+                models: {
+                  providers: {},
+                  active_llm: { provider_id: "", model: "" },
+                },
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        if (String(url).includes("/workspace/files/")) {
+          return new Response(JSON.stringify({ content: "# skill", source: "customized", enabled: true, references: {}, scripts: {} }), {
+            status: 200,
+          });
+        }
+        if (String(url).endsWith("/workspace/files")) {
+          return new Response(JSON.stringify({ files: [{ path: "config/envs.json", kind: "config", size: 16 }] }), { status: 200 });
         }
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       });
 
-    const outDir = await mkdtemp(join(tmpdir(), "copaw-cli-e2e-"));
-    const outFile = join(outDir, "workspace.zip");
+    const outDir = await mkdtemp(join(tmpdir(), "nextai-cli-e2e-"));
+    const outFile = join(outDir, "workspace.json");
     try {
       expect((await run(["app", "start"])).exitCode).toBe(0);
       expect((await run(["chats", "list", "--user-id", "u1", "--channel", "console"])).exitCode).toBe(0);
@@ -119,10 +151,26 @@ describe("cli e2e", () => {
       expect((await run(["env", "set", "--body", "{\"A\":\"1\"}"])).exitCode).toBe(0);
       expect((await run(["skills", "list"])).exitCode).toBe(0);
       expect((await run(["channels", "set", "console", "--body", "{\"enabled\":true}"])).exitCode).toBe(0);
-      expect((await run(["workspace", "download", "--out", outFile])).exitCode).toBe(0);
+      expect((await run(["workspace", "ls"])).exitCode).toBe(0);
+      expect((await run(["workspace", "cat", "config/envs.json"])).exitCode).toBe(0);
+      expect(
+        (
+          await run([
+            "workspace",
+            "put",
+            "--path",
+            "skills/demo-skill.json",
+            "--body",
+            "{\"content\":\"# demo\",\"source\":\"customized\",\"enabled\":true,\"references\":{},\"scripts\":{}}",
+          ])
+        ).exitCode,
+      ).toBe(0);
+      expect((await run(["workspace", "rm", "skills/demo-skill.json"])).exitCode).toBe(0);
+      expect((await run(["workspace", "export", "--out", outFile])).exitCode).toBe(0);
+      expect((await run(["workspace", "import", "--file", outFile])).exitCode).toBe(0);
 
-      const downloaded = await readFile(outFile);
-      expect(downloaded.length).toBe(3);
+      const downloaded = JSON.parse(await readFile(outFile, "utf8")) as { version?: string };
+      expect(downloaded.version).toBe("v1");
     } finally {
       await rm(outDir, { recursive: true, force: true });
     }
@@ -130,6 +178,14 @@ describe("cli e2e", () => {
     expect(calls.some((v) => v.method === "GET" && v.url.endsWith("/healthz"))).toBe(true);
     expect(calls.some((v) => v.method === "PUT" && v.url.includes("/config/channels/console"))).toBe(true);
     expect(calls.some((v) => v.method === "POST" && v.url.endsWith("/cron/jobs"))).toBe(true);
+    expect(calls.some((v) => v.method === "GET" && v.url.endsWith("/workspace/files"))).toBe(true);
+    expect(calls.some((v) => v.method === "GET" && v.url.includes("/workspace/files/config%2Fenvs.json"))).toBe(true);
+    const putFileCall = calls.find((v) => v.method === "PUT" && v.url.includes("/workspace/files/skills%2Fdemo-skill.json"));
+    expect(putFileCall).toBeDefined();
+    expect(JSON.parse(putFileCall?.body ?? "{}")).toMatchObject({ content: "# demo" });
+    expect(calls.some((v) => v.method === "DELETE" && v.url.includes("/workspace/files/skills%2Fdemo-skill.json"))).toBe(true);
+    expect(calls.some((v) => v.method === "GET" && v.url.endsWith("/workspace/export"))).toBe(true);
+    expect(calls.some((v) => v.method === "POST" && v.url.endsWith("/workspace/import"))).toBe(true);
   });
 
   it("covers models alias/custom-provider config with chat chain", async () => {
@@ -260,5 +316,119 @@ describe("cli e2e", () => {
     expect(processCalls).toHaveLength(2);
     expect(JSON.parse(processCalls[0]?.body ?? "{}")).toMatchObject({ session_id: "s-alias", user_id: "u1", channel: "console" });
     expect(JSON.parse(processCalls[1]?.body ?? "{}")).toMatchObject({ session_id: "s-custom", user_id: "u1", channel: "console" });
+  });
+
+  it("workspace export uses default workspace.json when --out omitted", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "nextai-cli-e2e-export-default-"));
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(tempDir);
+      const result = await runCLI(["--json", "workspace", "export"], async (url) => {
+        if (String(url).endsWith("/workspace/export")) {
+          return new Response(
+            JSON.stringify({
+              version: "v1",
+              skills: {},
+              config: {
+                envs: {},
+                channels: {},
+                models: {
+                  providers: {},
+                  active_llm: { provider_id: "", model: "" },
+                },
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      });
+
+      expect(result.exitCode).toBe(0);
+
+      const outFile = join(tempDir, "workspace.json");
+      const raw = await readFile(outFile, "utf8");
+      expect(raw).toContain("\"version\"");
+      expect(JSON.parse(raw)).toMatchObject({ version: "v1" });
+
+      const output = JSON.parse(result.logs[0] ?? "{}") as { written?: string };
+      expect(output.written).toBe("workspace.json");
+    } finally {
+      process.chdir(previousCwd);
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("workspace import defaults mode to replace when input json omits mode", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "nextai-cli-e2e-import-default-"));
+    try {
+      const inputFile = join(tempDir, "workspace-import.json");
+      const input = {
+        version: "v1",
+        skills: {},
+        config: {
+          envs: {},
+          channels: {},
+          models: {
+            providers: {},
+            active_llm: { provider_id: "", model: "" },
+          },
+        },
+      };
+      await writeFile(inputFile, JSON.stringify(input), "utf8");
+
+      let importBody = "";
+      const result = await runCLI(["workspace", "import", "--file", inputFile], async (url, init) => {
+        if (String(url).endsWith("/workspace/import")) {
+          importBody = typeof init?.body === "string" ? init.body : "";
+        }
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(importBody).not.toBe("");
+      expect(JSON.parse(importBody)).toMatchObject({
+        mode: "replace",
+        payload: input,
+      });
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("workspace put fails when both --body and --file are missing", async () => {
+    let fetchCalled = false;
+    const result = await runCLI(["workspace", "put", "--path", "skills/demo-skill.json"], async () => {
+      fetchCalled = true;
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain("workspace put");
+    expect(result.errors[0]).toContain("--body");
+    expect(result.errors[0]).toContain("--file");
+    expect(fetchCalled).toBe(false);
+  });
+
+  it("starts tui command with runtime options", async () => {
+    const startTUI = vi.fn(async () => {});
+    const result = await runCLI(
+      ["tui", "--session-id", "s-tui", "--user-id", "u-tui", "--channel", "console", "--api-base", "http://127.0.0.1:8088"],
+      async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      { startTUI },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(startTUI).toHaveBeenCalledTimes(1);
+    const call = startTUI.mock.calls[0]?.[0] as {
+      bootstrap?: { sessionID?: string; userID?: string; channel?: string; apiBase?: string };
+    };
+    expect(call.bootstrap).toMatchObject({
+      sessionID: "s-tui",
+      userID: "u-tui",
+      channel: "console",
+      apiBase: "http://127.0.0.1:8088",
+    });
   });
 });

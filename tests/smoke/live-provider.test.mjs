@@ -9,14 +9,14 @@ import { createServer } from "node:net";
 const gatewayDir = new URL("../../apps/gateway", import.meta.url);
 
 const liveAPIKey =
-  process.env.COPAW_LIVE_OPENAI_API_KEY ||
+  process.env.NEXTAI_LIVE_OPENAI_API_KEY ||
   process.env.OPENAI_API_KEY ||
   "";
 const liveBaseURL =
-  process.env.COPAW_LIVE_OPENAI_BASE_URL ||
+  process.env.NEXTAI_LIVE_OPENAI_BASE_URL ||
   process.env.OPENAI_BASE_URL ||
   "https://api.openai.com/v1";
-const liveModel = process.env.COPAW_LIVE_OPENAI_MODEL || "gpt-4o-mini";
+const liveModel = process.env.NEXTAI_LIVE_OPENAI_MODEL || "gpt-4o-mini";
 
 test(
   "nightly live provider chain: configure openai -> process chat",
@@ -26,7 +26,7 @@ test(
   },
   async () => {
     const port = await getFreePort();
-    const dataDir = await mkdtemp(join(tmpdir(), "copaw-live-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "nextai-live-"));
     const gatewayBin = join(dataDir, "gateway-live");
     const baseURL = `http://127.0.0.1:${port}`;
 
@@ -38,9 +38,9 @@ test(
       cwd: gatewayDir,
       env: {
         ...process.env,
-        COPAW_HOST: "127.0.0.1",
-        COPAW_PORT: String(port),
-        COPAW_DATA_DIR: dataDir,
+        NEXTAI_HOST: "127.0.0.1",
+        NEXTAI_PORT: String(port),
+        NEXTAI_DATA_DIR: dataDir,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });

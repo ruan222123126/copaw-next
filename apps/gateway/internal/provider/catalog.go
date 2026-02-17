@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"copaw-next/apps/gateway/internal/domain"
+	"nextai/apps/gateway/internal/domain"
 )
 
 const (
@@ -30,31 +30,12 @@ type ProviderSpec struct {
 	Models             []ModelSpec
 }
 
+type ProviderTypeSpec struct {
+	ID          string
+	DisplayName string
+}
+
 var builtinProviders = map[string]ProviderSpec{
-	"demo": {
-		ID:                 "demo",
-		Name:               "DEMO",
-		APIKeyPrefix:       "DEMO_API_KEY",
-		AllowCustomBaseURL: false,
-		DefaultBaseURL:     "",
-		Adapter:            AdapterDemo,
-		Models: []ModelSpec{
-			{
-				ID:     "demo-chat",
-				Name:   "Demo Chat",
-				Status: "active",
-				Capabilities: domain.ModelCapabilities{
-					Temperature: false,
-					Reasoning:   false,
-					Attachment:  false,
-					ToolCall:    false,
-					Input:       &domain.ModelModalities{Text: true},
-					Output:      &domain.ModelModalities{Text: true},
-				},
-				Limit: domain.ModelLimit{Context: 8192, Output: 2048},
-			},
-		},
-	},
 	"openai": {
 		ID:                 "openai",
 		Name:               "OPENAI",
@@ -95,12 +76,31 @@ var builtinProviders = map[string]ProviderSpec{
 	},
 }
 
+var providerTypes = []ProviderTypeSpec{
+	{
+		ID:          "openai",
+		DisplayName: "openai",
+	},
+	{
+		ID:          AdapterOpenAICompatible,
+		DisplayName: "openai Compatible",
+	},
+}
+
 func ListBuiltinProviderIDs() []string {
 	out := make([]string, 0, len(builtinProviders))
 	for id := range builtinProviders {
 		out = append(out, id)
 	}
 	sort.Strings(out)
+	return out
+}
+
+func ListProviderTypes() []ProviderTypeSpec {
+	out := make([]ProviderTypeSpec, 0, len(providerTypes))
+	for _, item := range providerTypes {
+		out = append(out, item)
+	}
 	return out
 }
 
@@ -118,6 +118,15 @@ func ResolveProvider(providerID string) ProviderSpec {
 		Adapter:            AdapterOpenAICompatible,
 		Models:             []ModelSpec{},
 	}
+}
+
+func IsBuiltinProviderID(providerID string) bool {
+	id := strings.ToLower(strings.TrimSpace(providerID))
+	if id == "" {
+		return false
+	}
+	_, ok := builtinProviders[id]
+	return ok
 }
 
 func ResolveAdapter(providerID string) string {
@@ -149,11 +158,24 @@ func ResolveModels(providerID string, aliases map[string]string) []domain.ModelI
 		if target == "" {
 			continue
 		}
-		base, ok := modelByID[target]
-		if !ok {
+		if _, exists := seen[alias]; exists {
 			continue
 		}
-		if _, exists := seen[alias]; exists {
+
+		base, ok := modelByID[target]
+		if !ok {
+			if len(spec.Models) > 0 {
+				continue
+			}
+			item := domain.ModelInfo{
+				ID:   alias,
+				Name: alias,
+			}
+			if alias != target {
+				item.AliasOf = target
+			}
+			out = append(out, item)
+			seen[alias] = struct{}{}
 			continue
 		}
 		base.ID = alias
@@ -192,6 +214,9 @@ func ResolveModelID(providerID, requestedModelID string, aliases map[string]stri
 		target = strings.TrimSpace(target)
 		if target != "" {
 			if _, exists := modelSet[target]; exists {
+				return target, true
+			}
+			if len(spec.Models) == 0 {
 				return target, true
 			}
 		}
@@ -237,11 +262,7 @@ func sortedAliasKeys(aliases map[string]string) []string {
 }
 
 func normalizeProviderID(providerID string) string {
-	id := strings.ToLower(strings.TrimSpace(providerID))
-	if id == "" {
-		return "demo"
-	}
-	return id
+	return strings.ToLower(strings.TrimSpace(providerID))
 }
 
 func cloneProviderSpec(in ProviderSpec) ProviderSpec {

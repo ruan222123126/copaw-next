@@ -9,20 +9,22 @@ import { registerEnvsCommand } from "./commands/envs.js";
 import { registerSkillsCommand } from "./commands/skills.js";
 import { registerWorkspaceCommand } from "./commands/workspace.js";
 import { registerChannelsCommand } from "./commands/channels.js";
+import { registerTUICommand } from "./commands/tui.js";
 import { printError, setOutputJSONMode } from "./io/output.js";
 import { initializeLocale, setLocale, t } from "./i18n.js";
 
 const program = new Command();
 const client = new ApiClient();
 const argv = rewriteLegacyBodyFlag(process.argv.slice(2));
+const localeEnv = process.env.NEXTAI_LOCALE;
 
-initializeLocale(argv, process.env.COPAW_LOCALE);
+initializeLocale(argv, localeEnv);
 
-program.name("copaw").description(t("cli.program.description")).version("0.1.0");
+program.name("nextai").description(t("cli.program.description")).version("0.1.0");
 program.option("--json", t("cli.option.json"));
 program.option("--locale <locale>", t("cli.option.locale"));
 program.hook("preAction", (thisCommand) => {
-  setLocale((thisCommand.optsWithGlobals() as { locale?: string }).locale ?? process.env.COPAW_LOCALE);
+  setLocale((thisCommand.optsWithGlobals() as { locale?: string }).locale ?? localeEnv);
   const enabled = Boolean(thisCommand.optsWithGlobals().json);
   setOutputJSONMode(enabled);
 });
@@ -35,8 +37,9 @@ registerEnvsCommand(program, client);
 registerSkillsCommand(program, client);
 registerWorkspaceCommand(program, client);
 registerChannelsCommand(program, client);
+registerTUICommand(program, client);
 
-program.parseAsync(["node", "copaw", ...argv]).catch((err) => {
+program.parseAsync(["node", "nextai", ...argv]).catch((err) => {
   printError(err);
   process.exit(1);
 });

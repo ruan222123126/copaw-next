@@ -1,25 +1,13 @@
 # Security Policy
 
-## 漏洞提交流程
 
-请不要在公开 issue 直接披露安全漏洞。
-
-- 邮件：`security@copaw.local`（如暂未启用，请通过仓库维护者私信）
-- 标题建议：`[copaw-next][security] <summary>`
-- 建议包含：影响范围、复现步骤、风险等级、修复建议
-
-收到报告后，目标响应时效：
-
-- 24 小时内确认收到
-- 72 小时内给出初步评估
-- 7 天内给出修复计划或缓解方案
 
 ## 密钥管理策略
 
 - 严禁在业务代码、测试快照、文档示例中硬编码密钥。
 - 密钥仅可来自环境变量或 Secret Store。
 - 推荐环境变量：
-  - `COPAW_LIVE_OPENAI_API_KEY`
+  - `NEXTAI_LIVE_OPENAI_API_KEY`
   - `OPENAI_API_KEY`
 - 提交前应执行 secret scanning，并检查 `git diff` 中是否包含敏感值。
 

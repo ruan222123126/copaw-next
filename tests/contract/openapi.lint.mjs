@@ -33,7 +33,9 @@ const modelSlotConfig = schemas.ModelSlotConfig;
 const activeModelsInfo = schemas.ActiveModelsInfo;
 const modelInfo = schemas.ModelInfo;
 const providerInfo = schemas.ProviderInfo;
+const providerTypeInfo = schemas.ProviderTypeInfo;
 const providerConfigPatch = schemas.ProviderConfigPatch;
+const deleteResult = schemas.DeleteResult;
 const modelCatalogInfo = schemas.ModelCatalogInfo;
 const apiKeyAuth = spec?.components?.securitySchemes?.ApiKeyAuth;
 
@@ -63,7 +65,7 @@ expect(agentProcessRequest?.properties?.input?.minItems === 1, "AgentProcessRequ
 expect(hasRequired(agentProcessRequest, "input"), "AgentProcessRequest.required 必须包含 input");
 expect(hasRequired(agentProcessRequest, "session_id"), "AgentProcessRequest.required 必须包含 session_id");
 expect(hasRequired(agentProcessRequest, "user_id"), "AgentProcessRequest.required 必须包含 user_id");
-expect(hasRequired(agentProcessRequest, "channel"), "AgentProcessRequest.required 必须包含 channel");
+expect(agentProcessRequest?.properties?.channel?.minLength === 1, "AgentProcessRequest.channel 必须设置 minLength=1");
 expect(hasRequired(agentProcessRequest, "stream"), "AgentProcessRequest.required 必须包含 stream");
 
 expect(Array.isArray(cronScheduleSpec?.properties?.type?.enum), "CronScheduleSpec.type 必须声明 enum");
@@ -96,10 +98,19 @@ expect(hasRequired(modelSlotConfig, "model"), "ModelSlotConfig.required 必须�
 expect(hasRequired(activeModelsInfo, "active_llm"), "ActiveModelsInfo.required 必须包含 active_llm");
 expect(hasRequired(modelInfo, "id"), "ModelInfo.required 必须包含 id");
 expect(hasRequired(modelInfo, "name"), "ModelInfo.required 必须包含 name");
+expect(providerInfo?.properties?.display_name?.minLength === 1, "ProviderInfo.display_name 必须设置 minLength=1");
+expect(hasRequired(providerInfo, "display_name"), "ProviderInfo.required 必须包含 display_name");
+expect(providerInfo?.properties?.openai_compatible?.type === "boolean", "ProviderInfo.openai_compatible 必须是 boolean");
+expect(hasRequired(providerInfo, "openai_compatible"), "ProviderInfo.required 必须包含 openai_compatible");
 expect(providerInfo?.properties?.enabled?.type === "boolean", "ProviderInfo.enabled 必须是 boolean");
 expect(hasRequired(providerInfo, "models"), "ProviderInfo.required 必须包含 models");
+expect(hasRequired(providerTypeInfo, "id"), "ProviderTypeInfo.required 必须包含 id");
+expect(hasRequired(providerTypeInfo, "display_name"), "ProviderTypeInfo.required 必须包含 display_name");
 expect(providerConfigPatch?.properties?.timeout_ms?.minimum === 0, "ProviderConfigPatch.timeout_ms 必须设置 minimum=0");
+expect(deleteResult?.properties?.deleted?.type === "boolean", "DeleteResult.deleted 必须是 boolean");
+expect(hasRequired(deleteResult, "deleted"), "DeleteResult.required 必须包含 deleted");
 expect(hasRequired(modelCatalogInfo, "providers"), "ModelCatalogInfo.required 必须包含 providers");
+expect(hasRequired(modelCatalogInfo, "provider_types"), "ModelCatalogInfo.required 必须包含 provider_types");
 expect(hasRequired(modelCatalogInfo, "defaults"), "ModelCatalogInfo.required 必须包含 defaults");
 expect(hasRequired(modelCatalogInfo, "active_llm"), "ModelCatalogInfo.required 必须包含 active_llm");
 

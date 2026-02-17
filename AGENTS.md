@@ -1,9 +1,9 @@
 # AGENTS.md
 
 ## 1. 项目定位
-- 项目名：CoPaw Next
-- 目标：个人 AI 助手控制平面（Gateway + CLI + Web）
-- v1 功能边界：以 copaw-local 为准，不扩展多端重功能
+- 项目名：NextAI
+- 目标：个人 AI 助手控制平面（Gateway + CLI + Web + TUI）
+- v1 功能边界：以 nextai-local 为准，不扩展多端重功能
 
 ## 2. 语言与沟通
 - 默认中文沟通

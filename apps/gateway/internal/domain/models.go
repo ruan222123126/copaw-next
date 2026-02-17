@@ -39,9 +39,10 @@ type ChatHistory struct {
 }
 
 type AgentInputMessage struct {
-	Role    string           `json:"role"`
-	Type    string           `json:"type"`
-	Content []RuntimeContent `json:"content"`
+	Role     string                 `json:"role"`
+	Type     string                 `json:"type"`
+	Content  []RuntimeContent       `json:"content"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
 
 type AgentProcessRequest struct {
@@ -51,6 +52,32 @@ type AgentProcessRequest struct {
 	Channel   string                 `json:"channel"`
 	Stream    bool                   `json:"stream"`
 	BizParams map[string]interface{} `json:"biz_params,omitempty"`
+}
+
+type AgentToolCallPayload struct {
+	Name  string                 `json:"name"`
+	Input map[string]interface{} `json:"input,omitempty"`
+}
+
+type AgentToolResultPayload struct {
+	Name    string `json:"name"`
+	OK      bool   `json:"ok"`
+	Summary string `json:"summary,omitempty"`
+}
+
+type AgentEvent struct {
+	Type       string                  `json:"type"`
+	Step       int                     `json:"step,omitempty"`
+	Delta      string                  `json:"delta,omitempty"`
+	Reply      string                  `json:"reply,omitempty"`
+	ToolCall   *AgentToolCallPayload   `json:"tool_call,omitempty"`
+	ToolResult *AgentToolResultPayload `json:"tool_result,omitempty"`
+	Meta       map[string]interface{}  `json:"meta,omitempty"`
+}
+
+type AgentProcessResponse struct {
+	Reply  string       `json:"reply"`
+	Events []AgentEvent `json:"events,omitempty"`
 }
 
 type CronScheduleSpec struct {
@@ -139,6 +166,8 @@ type ModelLimit struct {
 type ProviderInfo struct {
 	ID                 string      `json:"id"`
 	Name               string      `json:"name"`
+	DisplayName        string      `json:"display_name"`
+	OpenAICompatible   bool        `json:"openai_compatible"`
 	APIKeyPrefix       string      `json:"api_key_prefix"`
 	Models             []ModelInfo `json:"models"`
 	AllowCustomBaseURL bool        `json:"allow_custom_base_url"`
@@ -146,6 +175,11 @@ type ProviderInfo struct {
 	HasAPIKey          bool        `json:"has_api_key"`
 	CurrentAPIKey      string      `json:"current_api_key"`
 	CurrentBaseURL     string      `json:"current_base_url"`
+}
+
+type ProviderTypeInfo struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
 }
 
 type ModelSlotConfig struct {
@@ -158,9 +192,10 @@ type ActiveModelsInfo struct {
 }
 
 type ModelCatalogInfo struct {
-	Providers []ProviderInfo    `json:"providers"`
-	Defaults  map[string]string `json:"defaults"`
-	ActiveLLM ModelSlotConfig   `json:"active_llm"`
+	Providers     []ProviderInfo     `json:"providers"`
+	Defaults      map[string]string  `json:"defaults"`
+	ActiveLLM     ModelSlotConfig    `json:"active_llm"`
+	ProviderTypes []ProviderTypeInfo `json:"provider_types"`
 }
 
 type EnvVar struct {

@@ -1,5 +1,5 @@
 {
-  "name": "@copaw-next/sdk-ts",
+  "name": "@nextai/sdk-ts",
   "private": true,
   "version": "0.1.0",
   "type": "module",

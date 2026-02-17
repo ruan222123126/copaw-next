@@ -12,4 +12,21 @@ describe("ApiClient", () => {
       status: 400,
     });
   });
+
+  it("injects X-API-Key header when configured", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const c = new ApiClient({
+      base: "http://127.0.0.1:8088",
+      apiKey: "secret-token",
+    });
+    await c.get("/healthz");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const headers = init.headers instanceof Headers ? init.headers : new Headers(init.headers);
+    expect(headers.get("X-API-Key")).toBe("secret-token");
+    expect(headers.get("X-NextAI-Source")).toBe("cli");
+  });
 });

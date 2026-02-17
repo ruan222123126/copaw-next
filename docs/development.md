@@ -12,7 +12,7 @@
 pnpm install --recursive
 ```
 
-## Gateway / CLI / Web 并行开发
+## Gateway / CLI / Web / TUI 并行开发
 
 1. 启动 Gateway
 
@@ -29,10 +29,20 @@ pnpm build
 node dist/index.js --help
 # 多语言（可选）
 node dist/index.js --locale en-US chats list
-COPAW_LOCALE=en-US node dist/index.js chats list
+NEXTAI_LOCALE=en-US node dist/index.js chats list
 ```
 
-3. 单独开发 Web
+3. 单独开发 TUI
+
+```bash
+cd apps/cli
+pnpm build
+node dist/index.js tui
+# 指定连接配置（可选）
+node dist/index.js tui --api-base http://127.0.0.1:8088 --api-key your-key --user-id u1 --channel console
+```
+
+4. 单独开发 Web
 
 ```bash
 cd apps/web
@@ -57,7 +67,7 @@ cd tests/contract && pnpm test
 cd tests/smoke && pnpm test
 
 # 全仓回归
-cd /mnt/Files/copaw-next && pnpm -r test
+cd /mnt/Files/nextai && pnpm -r test
 ```
 
 ## 开发约束

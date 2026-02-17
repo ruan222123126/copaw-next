@@ -68,12 +68,11 @@ export function registerChatsCommand(program: Command, client: ApiClient): void 
         printResult(await client.post("/agent/process", payload));
         return;
       }
-      const base = process.env.COPAW_API_BASE ?? "http://127.0.0.1:8088";
-      const res = await fetch(`${base}/agent/process`, {
+      const request = client.buildRequest("/agent/process", {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       });
+      const res = await fetch(request.url, request.init);
       if (!res.ok || !res.body) {
         const text = await res.text();
         let parsed: unknown = {};

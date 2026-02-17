@@ -1,5 +1,5 @@
 {
-  "name": "@copaw-next/web",
+  "name": "@nextai/web",
   "private": true,
   "version": "0.1.0",
   "scripts": {
@@ -8,6 +8,7 @@
     "lint": "pnpm exec tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
+    "jsdom": "^28.1.0",
     "vitest": "^4.0.18"
   }
 }
