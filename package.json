@@ -1,8 +1,8 @@
 {
-  "name": "copaw-next",
+  "name": "nextai",
   "private": true,
   "version": "0.1.0",
-  "description": "CoPaw Next monorepo",
+  "description": "NextAI monorepo",
   "scripts": {
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",

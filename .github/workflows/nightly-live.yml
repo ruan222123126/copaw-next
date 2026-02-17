@@ -55,18 +55,18 @@ jobs:
 
       - name: Validate live provider secrets
         env:
-          COPAW_LIVE_OPENAI_API_KEY: ${{ secrets.COPAW_LIVE_OPENAI_API_KEY || secrets.OPENAI_API_KEY }}
+          NEXTAI_LIVE_OPENAI_API_KEY: ${{ secrets.NEXTAI_LIVE_OPENAI_API_KEY || secrets.OPENAI_API_KEY }}
         run: |
-          if [ -z "${COPAW_LIVE_OPENAI_API_KEY}" ]; then
-            echo "COPAW_LIVE_OPENAI_API_KEY (or OPENAI_API_KEY) is required for nightly live checks" >&2
+          if [ -z "${NEXTAI_LIVE_OPENAI_API_KEY}" ]; then
+            echo "NEXTAI_LIVE_OPENAI_API_KEY (or OPENAI_API_KEY) is required for nightly live checks" >&2
             exit 1
           fi
 
       - name: Run nightly live checks with retry
         env:
-          COPAW_LIVE_OPENAI_API_KEY: ${{ secrets.COPAW_LIVE_OPENAI_API_KEY || secrets.OPENAI_API_KEY }}
-          COPAW_LIVE_OPENAI_BASE_URL: ${{ secrets.COPAW_LIVE_OPENAI_BASE_URL || secrets.OPENAI_BASE_URL }}
-          COPAW_LIVE_OPENAI_MODEL: ${{ vars.COPAW_LIVE_OPENAI_MODEL || 'gpt-4o-mini' }}
+          NEXTAI_LIVE_OPENAI_API_KEY: ${{ secrets.NEXTAI_LIVE_OPENAI_API_KEY || secrets.OPENAI_API_KEY }}
+          NEXTAI_LIVE_OPENAI_BASE_URL: ${{ secrets.NEXTAI_LIVE_OPENAI_BASE_URL || secrets.OPENAI_BASE_URL }}
+          NEXTAI_LIVE_OPENAI_MODEL: ${{ vars.NEXTAI_LIVE_OPENAI_MODEL || 'gpt-4o-mini' }}
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do

@@ -1,6 +1,6 @@
-# CoPaw Next TODO
+# NextAI TODO
 
-更新时间：2026-02-17 11:54:49 +0800
+更新时间：2026-02-17 16:43:23 +0800
 
 ## 执行约定（强制）
 - 每位接手 AI 开始前，必须先阅读本文件与 `/home/ruan/.codex/handoff/latest.md`。
@@ -8,7 +8,7 @@
 - 每次执行后必须更新本文件：勾选完成项、记录阻塞原因、刷新“更新时间”。
 
 ## 0. 目标范围（v1）
-- 以 `copaw-local` 功能边界为准，遵循 `openclaw` 的工程方法（契约优先、分层测试、CI 分层、CLI/Gateway 分离），不扩展超出 v1 范围能力。
+- 以 `nextai-local` 功能边界为准，遵循 `openclaw` 的工程方法（契约优先、分层测试、CI 分层、CLI/Gateway 分离），不扩展超出 v1 范围能力。
 
 ## 1. 基础工程与规范
 - [x] Monorepo 结构、pnpm 包管理、核心文档（README/CONTRIBUTING/SECURITY）、`Makefile` 与 `.env.example` 已统一落地。
@@ -16,7 +16,7 @@
 ## 2. 核心实现（Gateway / CLI / Web）
 - [x] Gateway 已完成 v1 核心 API、统一错误模型、请求追踪、关键安全防护（如上传路径穿越拦截）、模型 provider/catalog/alias/配置管理等能力。
 - [x] CLI 已完成核心命令集、流式输出、错误分级提示、`--json` 机器输出、多语言与模型配置链路。
-- [x] Web 控制台已完成聊天与关键管理面板（Models/Envs/Workspace/Cron），并具备统一错误提示与多语言支持。
+- [x] Web 控制台已完成聊天与关键管理面板（Models/Channels/Workspace/Cron），并具备统一错误提示与多语言支持。
 
 ## 3. Contracts（契约）
 - [x] OpenAPI 契约与关键 schema 已补齐，契约 lint、契约测试与 SDK 生成流程已接入并可运行。
@@ -29,8 +29,140 @@
 - [x] `docs/v1-roadmap.md`、`docs/contracts.md`、本地开发文档、部署文档与发布模板已完成。
 
 ## 6. 实操验证（汇总）
+- [x] 2026-02-17 16:43 +0800 工作区整理分批提交（1/4）：提交 `f243dd1`（Gateway + OpenAPI/contract），新增 QQ 入站状态接口、`/agent/process` 渠道自动识别与上下文重置协议，契约同步 `channel` 可选与 `/channels/qq/state`。
+- [x] 2026-02-17 16:43 +0800 工作区整理分批提交（2/4）：提交 `9d3b74d`（Web），新增搜索页、聊天实时刷新、渠道配置面板与 Cron 交互增强，同步 e2e/smoke/unit 用例。
+- [x] 2026-02-17 16:43 +0800 工作区整理分批提交（3/4）：提交 `9084e3f`（CLI/TUI），新增 `nextai tui` 命令与 Ink 终端交互界面，补齐 slash/state/api-client 回归测试。
+- [x] 2026-02-17 16:43 +0800 工作区整理分批验证：`cd apps/gateway && go test ./...`、`pnpm --filter @nextai/tests-contract run lint && pnpm --filter @nextai/tests-contract run test`、`pnpm -C apps/web test && pnpm -C apps/web build`、`pnpm -C apps/cli test && pnpm -C apps/cli build`、`pnpm -C tests/smoke test` 全部通过（live 用例按预期 skip）。
+- [x] 2026-02-17 16:36 +0800 TUI 流式消息渲染修复：将聊天日志拆分为“稳定消息 + 流式中的最后一条消息”，`Static` 仅渲染稳定消息，流式消息改为普通 `<Text>` 实时更新，修复回复被剪碎/错位追加问题。
+- [x] 2026-02-17 16:36 +0800 验证通过：`pnpm -C apps/cli test`、`pnpm -C apps/cli build`。
+- [x] 2026-02-17 16:30 +0800 服务重启验证：先停止 `8088/5173` 端口存量进程，再按指定方式去掉代理环境启动 Gateway（`env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）并启动 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`。
+- [x] 2026-02-17 16:28 +0800 Web 会话列表排序修复：跨渠道聚合后统一按 `updated_at` 倒序（最新在上）排序，修复“历史列表未按最后消息时间从上到下排列”。
+- [x] 2026-02-17 16:28 +0800 Web e2e 稳定性修复：删除/搜索用例改为按 `session_id` 精确定位目标会话，不再依赖“首条会话”顺序，避免排序策略升级引发误报。
+- [x] 2026-02-17 16:28 +0800 验证通过：`pnpm -C apps/web exec vitest run test/e2e/web-shell-tool-flow.test.ts`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 16:27 +0800 服务重启验证：先停止 `8088/5173` 端口存量进程，再按指定方式去掉代理环境启动 Gateway（`env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）并启动 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`。
+- [x] 2026-02-17 16:25 +0800 Gateway 会话上下文连续性修复：`/agent/process` 调模型前改为加载当前 `session_id+user_id+channel` 的完整历史（含 assistant/tool 元数据），不再只传本轮 `input`，修复“每次对话独立、模型记不住上一轮”的问题。
+- [x] 2026-02-17 16:25 +0800 Gateway 回归补测：新增 `TestProcessAgentReusesChatHistoryContext`，断言同一会话第二轮回复包含上一轮与当前轮用户输入。
+- [x] 2026-02-17 16:25 +0800 验证通过：`cd apps/gateway && go test ./internal/app -run "TestProcessAgentReusesChatHistoryContext|TestChatCreateAndGetHistory"`、`cd apps/gateway && go test ./internal/app`、`cd apps/gateway && go test ./...`。
+- [x] 2026-02-17 16:22 +0800 Web Provider 新增覆盖修复：创建 Provider 时不再直接使用 `provider type` 作为 `provider_id`；对 `openai-compatible` 创建场景改为生成唯一 ID（冲突自动追加 `-2/-3...`），避免新增时覆盖已有同类型 Provider。
+- [x] 2026-02-17 16:22 +0800 Web e2e 回归补齐：新增“已有 `openai-compatible` 时再次新增同类型 Provider 不覆盖原配置”断言，校验创建请求落到新的 `provider_id`。
+- [x] 2026-02-17 16:22 +0800 验证通过：`pnpm -C apps/web exec vitest run test/e2e/web-active-model-chat-flow.test.ts`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 16:18 +0800 服务重启验证：先停止 `8088/5173` 端口存量进程，再按指定方式去掉代理环境启动 Gateway（`env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）并启动 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`。
+- [x] 2026-02-17 16:16 +0800 Web 会话列表与搜索结果一致性修复：`reloadChats` 默认聚合 `console(user_id)` + `qq` 会话，聊天列表与搜索页使用同一批数据，修复“搜索有记录但会话列表没有”。
+- [x] 2026-02-17 16:16 +0800 Web 列表闪烁修复：轮询拉取后新增会话摘要比对（`id + updated_at`），无变化时不重绘列表，消除会话列表持续闪烁。
+- [x] 2026-02-17 16:16 +0800 验证通过：`pnpm -C apps/web exec vitest run test/e2e/web-shell-tool-flow.test.ts`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 16:11 +0800 服务重启验证：先停止 `8088/5173` 端口存量进程，再按指定方式去掉代理环境启动 Gateway（`env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）并启动 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`。
+- [x] 2026-02-17 16:11 +0800 TUI 重复输出修复：移除聊天日志 `Static` 的动态 `key`，避免每次状态变化重建组件导致历史整段重复打印；日志改为稳定实例增量追加。
+- [x] 2026-02-17 16:11 +0800 验证通过：`pnpm -C apps/cli test`、`pnpm -C apps/cli build`。
+- [x] 2026-02-17 16:09 +0800 Web 会话历史跨渠道聚合：搜索页拉取会话时同时请求 `channel=console&user_id=<当前用户>` 与 `channel=qq`（不带 `user_id`），并按 `updated_at` 合并排序，修复“默认仅显示 console 导致 QQ 历史不可见”。
+- [x] 2026-02-17 16:09 +0800 Web e2e 补测：新增断言“搜索页会触发 QQ 会话拉取且不带 `user_id`，并展示 QQ 入站会话”。
+- [x] 2026-02-17 16:09 +0800 验证通过：`pnpm -C apps/web exec vitest run test/e2e/web-shell-tool-flow.test.ts`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 16:08 +0800 Web 聊天页实时刷新补丁：新增后台轮询机制，用户停留在聊天页且正在查看某会话时，自动检测会话 `updated_at` 变化并拉取最新历史，解决“Cron 执行中内容不实时刷新”问题。
+- [x] 2026-02-17 16:08 +0800 Web e2e 补测：新增“聊天页打开会话后应自动刷新后台新增消息”用例，覆盖后台消息写入后的自动展示链路。
+- [x] 2026-02-17 16:08 +0800 验证通过：`pnpm -C apps/web exec vitest run test/e2e/web-shell-tool-flow.test.ts --testNamePattern="聊天页打开会话后应自动刷新后台新增消息|Cron 任务创建后支持编辑和删除"`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 16:03 +0800 Web 会话可见性补丁：切换到 `chat/search` 标签页时强制拉取最新 `/chats`，修复“Cron 已执行但搜索页仍显示空结果”的前端缓存滞后问题。
+- [x] 2026-02-17 16:03 +0800 Web e2e 补测：Cron 场景新增断言“切换到搜索页会再次触发 `/chats` 拉取”，防止后续回归。
+- [x] 2026-02-17 16:03 +0800 验证通过：`pnpm -C apps/web exec vitest run test/e2e/web-shell-tool-flow.test.ts --testNamePattern="Cron 任务创建后支持编辑和删除"`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 16:02 +0800 TUI 启动策略调整：默认启动即创建全新会话，不再自动进入旧会话；历史会话统一通过 `/history` 进入，行为对齐“新对话优先”。
+- [x] 2026-02-17 16:02 +0800 验证通过：`pnpm -C apps/cli test`、`pnpm -C apps/cli build`。
+- [x] 2026-02-17 15:59 +0800 `/new` 成功提示文案更新：上下文清理命中后统一返回“上下文已清理，已开始新会话。”，适用于 `/agent/process` 与 QQ 入站回调链路。
+- [x] 2026-02-17 15:59 +0800 回归断言同步：`server_test` 中 console/QQ 两条 `/new` 用例改为校验“上下文已清理”中文成功提示。
+- [x] 2026-02-17 15:59 +0800 验证通过：`cd apps/gateway && go test ./internal/app -run "TestProcessAgentNewCommandClearsSessionContext|TestQQInboundNewCommandClearsSessionContext"`、`cd apps/gateway && go test ./internal/app`。
+- [x] 2026-02-17 15:58 +0800 TUI slash 命令菜单落地：输入 `/` 即展示特殊命令列表（`/history`、`/new`、`/refresh`、`/settings`、`/exit`），支持 ↑/↓/Tab 选择与 Enter 执行。
+- [x] 2026-02-17 15:58 +0800 TUI 交互一致性补齐：保留“未知 `/xxx` 作为普通消息发送”行为，已实现命令走本地执行（打开历史弹窗、创建会话、刷新、打开设置、退出）。
+- [x] 2026-02-17 15:58 +0800 验证通过：`pnpm -C apps/cli test`、`pnpm -C apps/cli build`。
+- [x] 2026-02-17 15:57 +0800 Cron 执行失败可见性修复：`executeCronJob` 在写回 `last_status/last_error` 后会继续返回执行错误，`POST /cron/jobs/{job_id}/run` 不再对失败任务统一返回 `started=true`；`dispatch.channel=qq` 改为显式报错（`qq` 为 inbound-only）。
+- [x] 2026-02-17 15:57 +0800 Web Cron 提交链路修复：保存任务时强制使用当前控制台 `channel/user_id`（不再继承旧任务残留的 `qq/legacy-user`），并在手动执行任务后自动刷新会话列表，避免“执行后历史不可见”。
+- [x] 2026-02-17 15:57 +0800 验证通过：`cd apps/gateway && go test ./internal/app -run "TestRunCronJobQQChannelFailsFast|TestRunCronJobRoutesConsoleTextThroughAgent|TestRunCronJobDispatchesToWebhookChannel|TestExecuteCronJobRespectsTimeout"`、`pnpm -C apps/web exec vitest run test/e2e/web-shell-tool-flow.test.ts --testNamePattern="Cron 任务创建后支持编辑和删除"`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 15:55 +0800 TUI 交互形态升级：聊天区从固定边框容器切换为终端滚动日志流（`Static`），历史内容可直接通过终端滚动查看，输入区保持底部固定。
+- [x] 2026-02-17 15:55 +0800 TUI 布局联动优化：结合 `/history` 弹窗与设置面板动态计算可见会话窗口，保留底部状态/输入区域稳定展示。
+- [x] 2026-02-17 15:55 +0800 验证通过：`pnpm -C apps/cli test`、`pnpm -C apps/cli build`。
+- [x] 2026-02-17 15:56 +0800 服务重启验证：按指定方式去掉代理环境启动 Gateway（`env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）并启动 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`。
+- [x] 2026-02-17 15:51 +0800 QQ 出站能力恢复：移除 `/agent/process` 在 `channel=qq` 时跳过 `SendText` 的逻辑，恢复 QQ 与其他渠道一致的出站分发；QQ 入站回调触发对话后可直接回发到原会话目标。
+- [x] 2026-02-17 15:51 +0800 QQ 回归测试改造：将“QQ 不触发出站”用例改为“QQ 必须触发出站”，并补齐 `/new` 重置链路的真实 QQ 发送断言（同一会话共 3 次回发）。
+- [x] 2026-02-17 15:51 +0800 验证通过：`cd apps/gateway && go test ./internal/app -run "TestProcessAgentRespectsRequestedChannelForWebSource|TestProcessAgentQQChannelDispatchesOutboundMessage|TestQQInboundC2CEventTriggersOutboundDispatch|TestQQInboundGroupEventTriggersOutboundDispatch|TestQQInboundNewCommandClearsSessionContext"`、`cd apps/gateway && go test ./internal/app`、`cd apps/gateway && go test ./...`。
+- [x] 2026-02-17 15:49 +0800 TUI 聊天框溢出修复：消息渲染由“按消息条数裁剪”改为“按终端宽度换行 + 按可见行数裁剪”，解决中文长文本/多行内容溢出绿色边框问题。
+- [x] 2026-02-17 15:49 +0800 TUI 渲染策略增强：引入字符显示宽度计算（`string-width`），区分首行前缀（`You:/AI:`）与续行缩进，确保 CJK/emoji 宽度下裁剪边界稳定。
+- [x] 2026-02-17 15:49 +0800 验证通过：`pnpm -C apps/cli test`、`pnpm -C apps/cli build`。
+- [x] 2026-02-17 15:45 +0800 QQ 回传故障排查结论：当前网关实现为“QQ 入站-only”，`processAgentWithBody` 在 `channel=qq` 时显式跳过 `channelPlugin.SendText`，因此“控制台消息无法发回 QQ”是现有策略，不是连接故障。
+- [x] 2026-02-17 15:45 +0800 现场状态验证：`GET /channels/qq/state` 返回 `connected=true`、`last_event_type=C2C_MESSAGE_CREATE`，说明 QQ 入站链路正常，问题仅在出站分发被禁用。
+- [x] 2026-02-17 15:43 +0800 渠道路由回退：移除 `/agent/process` 按 `X-NextAI-Source` 强制改写 channel 的逻辑，恢复“优先使用请求 `channel`，未传时默认 `console`”；保留 QQ 入站路径固定 `channel=qq`。
+- [x] 2026-02-17 15:43 +0800 回归测试更新：原“web 强制 console”改为“web 来源头下仍尊重请求 channel”；保留“cli 未传 channel 默认 console”用例。
+- [x] 2026-02-17 15:43 +0800 验证通过：`cd apps/gateway && go test ./internal/app -run "TestProcessAgentRespectsRequestedChannelForWebSource|TestProcessAgentDefaultsToConsoleForCLISourceWithoutChannel|TestProcessAgentQQChannelSkipsOutboundDispatch|TestQQInboundC2CEventDoesNotTriggerOutboundDispatch"`、`cd apps/gateway && go test ./...`。
+- [x] 2026-02-17 15:37 +0800 TUI 窗口自适配：基于终端实时 `rows/columns` 动态计算聊天区高度、可见消息条数与历史弹窗可见条数，窗口缩放后自动重排内容，移除固定 `minHeight=20` 布局。
+- [x] 2026-02-17 15:37 +0800 TUI 显示优化：状态信息行按当前终端宽度截断，避免窄窗口下长 `api_base` 撑爆布局。
+- [x] 2026-02-17 15:37 +0800 验证通过：`pnpm -C apps/cli test`、`pnpm -C apps/cli build`。
+- [x] 2026-02-17 15:32 +0800 TUI 退格兼容修复：输入处理新增 `DEL(\u007f)`、`BS(\u0008)`、`Ctrl+H` 与 `key.delete` 兼容判断，修复部分终端“退格无效”问题（聊天输入与设置输入均生效）。
+- [x] 2026-02-17 15:32 +0800 验证通过：`pnpm -C apps/cli test`、`pnpm -C apps/cli build`。
+- [x] 2026-02-17 15:31 +0800 Web 搜索结果卡片层级修复：搜索列表项移除 `detail-item` 容器样式，仅保留按钮卡片层，解决“卡片嵌套卡片”导致的双边框观感问题。
+- [x] 2026-02-17 15:31 +0800 验证通过：`pnpm -C apps/web build`。
+- [x] 2026-02-17 15:30 +0800 渠道自动识别落地：`/agent/process` 改为按来源自动判定渠道（`X-NextAI-Source=web/cli -> console`，`/channels/qq/inbound` 或 `source=qq -> qq`），不再依赖手工切换 `channel`。
+- [x] 2026-02-17 15:30 +0800 客户端来源标记补齐：Web/CLI 请求统一附带 `X-NextAI-Source`（分别为 `web`/`cli`）；Gateway 新增回归测试覆盖“web 强制 console”“cli 缺省 channel 仍走 console”。
+- [x] 2026-02-17 15:30 +0800 验证通过：`cd apps/gateway && go test ./internal/app -run "TestProcessAgentAutoUsesConsoleChannelForWebSource|TestProcessAgentAutoUsesConsoleChannelForCLISourceWithoutChannel|TestProcessAgentQQChannelSkipsOutboundDispatch|TestQQInboundC2CEventDoesNotTriggerOutboundDispatch"`、`cd apps/gateway && go test ./...`、`pnpm -C apps/cli test -- test/unit/api-client.test.ts`、`pnpm -C apps/cli build`、`pnpm -C apps/web test -- test/smoke/shell.test.ts`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 15:29 +0800 TUI 交互改造：移除常驻 history/session 侧栏，改为输入 `/history` 后打开独立“历史会话”弹窗，支持 ↑/↓ 选择、Enter 确认切换、Esc 取消。
+- [x] 2026-02-17 15:29 +0800 TUI 文案同步：快捷键提示改为“输入 /history 选历史会话”，新增历史弹窗状态与操作提示中英文文案。
+- [x] 2026-02-17 15:29 +0800 验证通过：`pnpm -C apps/cli test`、`pnpm -C apps/cli build`。
+- [x] 2026-02-17 15:27 +0800 Cron 文本任务执行链路修复：`dispatch.channel=console` 时不再把 `job.text` 直接投递为聊天输出，改为内部调用 `/agent/process` 作为 user 输入喂给 AI，按正常对话链路产出 assistant 回复并写回会话。
+- [x] 2026-02-17 15:27 +0800 验证通过：`cd apps/gateway && go test ./internal/app -run "Cron|RunCronJobRoutesConsoleTextThroughAgent"`、`cd apps/gateway && go test ./...`。
+- [x] 2026-02-17 15:22 +0800 TUI 能力落地：CLI 新增 `nextai tui` 子命令（Ink + React），支持会话列表、新建会话、消息发送、SSE 流式回复、历史查看与运行时设置（API Base/API Key/User ID/Channel/Locale）。
+- [x] 2026-02-17 15:22 +0800 CLI 客户端链路补齐：`ApiClient` 新增 `X-API-Key` 透传、可变 `base/apiKey`、统一请求构建；`chats send --stream` 与 TUI 复用同一鉴权/地址能力。
+- [x] 2026-02-17 15:22 +0800 契约文档同步：`AGENTS.md` 目标升级为 `Gateway + CLI + Web + TUI`；`docs/contracts.md` 新增 `nextai tui`；`docs/development.md` 增补 TUI 开发启动命令。
+- [x] 2026-02-17 15:22 +0800 验证通过：`pnpm -C apps/cli test`、`pnpm -C apps/cli build`、`cd apps/cli && node dist/index.js --help`、`cd apps/cli && node dist/index.js tui --help`。
+- [x] 2026-02-17 15:22 +0800 Web 控制台设置弹窗滚动条调整：隐藏右侧竖向滚动条样式（保留面板滚动能力），解决设置弹窗右侧滑条可见问题。
+- [x] 2026-02-17 15:22 +0800 验证通过：`pnpm -C apps/web build`。
+- [x] 2026-02-17 15:18 +0800 Web 会话列表删除按钮样式调整：删除入口改为卡片内垃圾桶图标按钮，图标替换为指定 `svg` 路径，移除红色外圈底样式，仅保留透明图标态与轻量 hover/focus 反馈。
+- [x] 2026-02-17 15:18 +0800 验证通过：`pnpm -C apps/web build`。
+- [x] 2026-02-17 15:14 +0800 Web Cron 面板按钮位置调整：将“打开创建窗口”入口从下方“创建间隔文本任务”区域移动到面板头部操作区，并放在“刷新”按钮左侧。
+- [x] 2026-02-17 15:14 +0800 验证通过：`pnpm -C apps/web build`。
+- [x] 2026-02-17 15:14 +0800 新增会话重置指令：`/agent/process` 与 QQ 入站统一支持输入 `/new` 清理当前 `session_id+user_id+channel` 上下文；命中时不再调用模型，直接返回“Context cleared”确认并开始新会话。
+- [x] 2026-02-17 15:14 +0800 验证通过：`cd apps/gateway && go test ./internal/app -run "TestProcessAgentNewCommandClearsSessionContext|TestQQInboundNewCommandClearsSessionContext"`、`cd apps/gateway && go test ./internal/app`、`cd apps/gateway && go test ./...`。
+- [x] 2026-02-17 15:10 +0800 Cron 会话可见性修复：`dispatch.channel=console` 的定时文本任务执行时不再仅打日志，改为写入目标会话历史（复用 `session_id + user_id + channel` 命中已有会话，未命中则自动创建），并携带 `metadata.source=cron`。
+- [x] 2026-02-17 15:10 +0800 Web Cron 面板可观测性增强：任务列表新增“状态”列，展示 `last_status`（running/succeeded/failed/paused/resumed），失败场景可通过单元格 `title` 查看 `last_error`。
+- [x] 2026-02-17 15:10 +0800 验证通过：`cd apps/gateway && go test ./internal/app -run "Cron|RunCronJobPersistsConsoleTextToExistingChat"`、`pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts test/smoke/shell.test.ts`。
+- [x] 2026-02-17 15:01 +0800 Web 聊天列表删除按钮样式优化：将“删除”文字按钮改为卡片内垃圾桶图标按钮（右上角悬浮），保留原删除确认与事件逻辑，提升视觉一致性与可读性。
+- [x] 2026-02-17 15:01 +0800 验证通过：`pnpm -C apps/web lint`。
+- [x] 2026-02-17 13:46 +0800 Web 新增会话搜索页面：新增 `tab=search/panel-search`，支持按会话名/Session ID/用户 ID/渠道过滤会话，点击结果可直接进入该会话并自动切回聊天页。
+- [x] 2026-02-17 13:46 +0800 验证通过：`pnpm -C apps/web test -- test/smoke/shell.test.ts test/e2e/web-shell-tool-flow.test.ts`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 13:43 +0800 Web 工作区编辑体验修复：`/workspace/files/{file_path}` 返回 `{"content":"..."}` 时改为文本模式展示与保存，不再把正文显示成带 `\\n`/`\\\"` 的转义 JSON 字符串。
+- [x] 2026-02-17 13:43 +0800 验证通过：`pnpm -C apps/web test -- test/unit/api-utils.test.ts test/unit/i18n.test.ts`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 13:46 +0800 回归测试补齐：新增 Web e2e 用例覆盖工作区文本文件编辑链路，验证打开时显示原文、保存时提交 `{"content":"..."}`。
+- [x] 2026-02-17 13:46 +0800 验证通过：`pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts`。
+- [x] 2026-02-17 13:43 +0800 Workspace 配置文件列表修复：`GET /workspace/files` 由“仅返回单个 `docs/AI` 提示词文件”改为“递归返回 `docs/AI` 目录全部文件”，并保持 `config/*` 与 `skills/*` 列表逻辑不变。
+- [x] 2026-02-17 13:43 +0800 验证通过：`cd apps/gateway && go test ./internal/app -run "WorkspaceFilesListIncludesConfigAndSkillFiles|WorkspaceFileConfigAndSkillCRUD"`、`cd apps/gateway && go test ./internal/app`。
+- [x] 2026-02-17 13:42 +0800 Web Cron 面板修复：任务列表新增“编辑/删除”按钮，创建弹窗支持“创建/编辑”双模式并接入 `PUT /cron/jobs/{job_id}` 与 `DELETE /cron/jobs/{job_id}`，修复“创建后不能删除和编辑”。
+- [x] 2026-02-17 13:42 +0800 验证通过：`pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 13:41 +0800 Web 页面收敛：按需求移除环境变量页面（删除 `tab=envs` 与 `panel-envs`），同步清理前端 `main.ts` 的 `envs` 面板状态、事件绑定与 `/envs` 请求逻辑。
+- [x] 2026-02-17 13:41 +0800 验证通过：`pnpm -C apps/web test -- test/smoke/shell.test.ts`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 13:34 +0800 Provider 工具参数解析容错：当模型返回 tool call 参数非法 JSON（如 `view` 参数截断）时，不再直接返回 `provider_invalid_reply` 中断；改为生成失败 `tool_result` + `tool` 反馈（包含 `parse_error/raw_arguments`）回传模型并继续下一轮自修。
+- [x] 2026-02-17 13:34 +0800 验证通过：`cd apps/gateway && go test ./internal/runner -run "InvalidToolArguments|ToolCalls|GenerateTurnStreamOpenAIAggregatesToolCalls"`、`cd apps/gateway && go test ./internal/app -run "ContinuesAfterProviderToolArgumentParseError|ContinuesAfterToolInputError|ContinuesAfterToolPathError"`、`cd apps/gateway && go test ./...`。
 - [x] Go/TS 全量关键检查通过：`go test ./...`、`make gateway-coverage`、`pnpm -r lint/test/build`。
 - [x] 分模块验证通过：Web、CLI、Contracts、SDK 生成、Gateway provider 兼容性相关回归均已通过。
+- [x] 2026-02-17 13:25 +0800 按需求改为“QQ 永久入站-only”：删除 `/agent/process` 与 cron 对 `channel=qq` 的出站发送调用（不再触发 QQ REST 发消息）。
+- [x] 2026-02-17 13:25 +0800 同步回退 `outbound_enabled` 临时方案：移除 Gateway 默认字段、Web 面板开关与契约文档中的 `outbound_enabled` 描述。
+- [x] 2026-02-17 13:25 +0800 验证通过：`cd apps/gateway && go test ./...`、`pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts`、`pnpm -C apps/web build`、`pnpm --filter @nextai/tests-contract run lint`、`pnpm --filter @nextai/tests-contract run test`。
+- [x] 2026-02-17 13:29 +0800 Web 信息架构调整：将渠道配置从“配置文件页面”迁移为独立 `Channels` 页面（新增 `tab=channels/panel-channels`），`workspace` 页面仅保留配置文件管理。
+- [x] 2026-02-17 13:29 +0800 验证通过：`pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts test/smoke/shell.test.ts test/unit/i18n.test.ts`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 13:18 +0800 QQ 渠道新增 `outbound_enabled` 开关：关闭后仅保留入站链路（`/channels/qq/state` 仍可 `connected=true`），`/agent/process` 与 QQ 入站事件回调不再执行 QQ 出站发送。
+- [x] 2026-02-17 13:18 +0800 Web QQ 面板新增“启用出站发送”复选框，并在保存时下发 `outbound_enabled`；补充 e2e 覆盖“切沙箱 + 关闭出站”提交 payload。
+- [x] 2026-02-17 13:18 +0800 验证通过：`cd apps/gateway && go test ./...`、`pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts`、`pnpm -C apps/web build`、`pnpm --filter @nextai/tests-contract run lint`、`pnpm --filter @nextai/tests-contract run test`。
+- [x] 2026-02-17 13:20 +0800 每次对话系统提示词默认文件已从 `docs/AI/ai-tools.md` 切换为 `docs/AI/AGENTS.md`，并保留旧路径 `docs/AI/ai-tools.md` 与 `docs/ai-tools.md` 作为读取兼容兜底。
+- [x] 2026-02-17 13:20 +0800 验证通过：`cd apps/gateway && go test ./internal/app`。
+- [x] 2026-02-17 13:02 +0800 Web QQ 配置面板新增 `API 环境`（生产/沙箱）切换，下发时自动映射 `api_base`（`https://api.sgroup.qq.com` / `https://sandbox.api.sgroup.qq.com`），无需再手工 `curl` 改配置。
+- [x] 2026-02-17 13:02 +0800 验证通过：`pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 12:43 +0800 新增 QQ 诊断接口：`GET /channels/qq/state`，返回配置快照（是否配置、intents 来源）与 WS 运行态（running/connected、最近连接时间、最近事件、最近错误）。
+- [x] 2026-02-17 12:43 +0800 验证通过：`cd apps/gateway && go test ./...`、`pnpm --filter @nextai/tests-contract run lint`、`pnpm --filter @nextai/tests-contract run test`、`pnpm --dir packages/sdk-ts run generate && pnpm --dir packages/sdk-ts run generate:check`。
+- [x] 2026-02-17 12:37 +0800 命名安全改完成：全仓旧品牌字段统一替换为 `NextAI`（品牌文案、CLI 命令、包名、OpenAPI 标题、环境变量前缀、localStorage key、文档示例等）。
+- [x] 2026-02-17 12:37 +0800 验证通过：`pnpm -C apps/cli test`、`pnpm -C apps/cli build`、`pnpm -C apps/web test`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 12:43 +0800 阻塞已解除：Gateway 新增 `NEXTAI_DISABLE_QQ_INBOUND_SUPERVISOR` 开关，测试默认关闭 QQ inbound supervisor，`go test ./...` 全量通过。
+- [x] 2026-02-17 12:43 +0800 零残留完成：移除全部旧品牌兼容路径（旧 CLI 别名、`NEXTAI_*` 回退旧前缀、Web 旧 localStorage 迁移、CI/live 旧 secret/var 回退）。
+- [x] 2026-02-17 12:44 +0800 最终回归通过：`cd apps/gateway && go test ./...`、`pnpm -C apps/cli test && pnpm -C apps/cli build`、`pnpm -C apps/web test && pnpm -C apps/web build`。
+- [x] 2026-02-17 12:36 +0800 QQ dispatch 根因定位：运行环境存在失效代理配置（`HTTP(S)_PROXY=127.0.0.1:7897`），导致 QQ token 请求优先走本地代理并连接拒绝，触发 `channel_dispatch_failed`。
+- [x] 2026-02-17 12:36 +0800 验证结论：去掉代理环境后不再命中 7897，但当前沙箱 DNS 无法解析 `bots.qq.com`（`Could not resolve host`），需在实际可联网环境验证。
+- [x] 2026-02-17 12:34 +0800 QQ inbound 编译回归修复：补齐 `qq_inbound.go` 缺失的 `errors/strconv` import，并通过 `gofmt` 统一格式。
+- [x] 2026-02-17 12:34 +0800 验证通过：`cd apps/gateway && go test ./...`。
+- [x] 2026-02-17 12:33 +0800 QQ 配置面板简化：按反馈移除 `目标 ID`、`API Base`、`Token URL` 三个输入项；保存逻辑改为沿用后端当前值，避免误改连接参数。
+- [x] 2026-02-17 12:33 +0800 验证通过：`pnpm -C apps/web test`、`pnpm -C apps/web build`。
+- [x] 2026-02-17 12:03 +0800 QQ WS 入站迁移：Gateway 新增 QQ inbound supervisor（自动拉取 `channels.qq` 配置并维持 Gateway WebSocket 连接），接收 `C2C_MESSAGE_CREATE/GROUP_AT_MESSAGE_CREATE/AT_MESSAGE_CREATE/DIRECT_MESSAGE_CREATE` 事件后自动转发到 `/channels/qq/inbound` 复用现有处理链。
+- [x] 2026-02-17 12:03 +0800 验证通过：`cd apps/gateway && go test ./...`（含 `go mod tidy` 后依赖校验）。
 - [x] 2026-02-17 11:54 +0800 CI 失败修复：放宽 smoke 中 SSE chunk 数断言（由“必须 >=2”改为“>=1 且以 `[DONE]` 结束”），兼容单 chunk 合法流式返回，消除 `expected multi-chunk SSE, got chunks=1` 假失败。
 - [x] 2026-02-17 11:54 +0800 验证通过：`pnpm -C tests/smoke test`。
 - [x] 2026-02-17 11:52 +0800 QQ 发送故障排查：确认当前 `state.json` 的 `channels.qq.target_id` 为空，且历史中不存在 `channel=qq` 会话记录（说明请求尚未形成有效 QQ 出站链路）。
@@ -44,13 +176,13 @@
 - [x] 2026-02-17 11:43 +0800 Web 工具调用文案优化：`view` / `edit`（兼容 `exit`）调用摘要改为“查看（文件路径）/编辑（文件路径）”，不再显示“调用任务 'view' / 'edit'”；补充 e2e 回归覆盖流式展示与历史恢复。
 - [x] 2026-02-17 11:43 +0800 验证通过：`pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts`、`pnpm -C apps/web build`。
 - [x] 2026-02-17 11:35 +0800 QQ 入站闭环落地：新增 `POST /channels/qq/inbound`，支持解析 QQ 入站事件（c2c/group/guild）并复用 `/agent/process` 主流程，按事件动态覆盖 `qq` 通道 `target_type/target_id/msg_id` 后回发。
-- [x] 2026-02-17 11:35 +0800 验证通过：`cd apps/gateway && go test ./...`、`pnpm --filter @copaw-next/tests-contract run lint`、`pnpm --filter @copaw-next/tests-contract run test`、`pnpm --dir packages/sdk-ts run generate && pnpm --dir packages/sdk-ts run generate:check`。
+- [x] 2026-02-17 11:35 +0800 验证通过：`cd apps/gateway && go test ./...`、`pnpm --filter @nextai/tests-contract run lint`、`pnpm --filter @nextai/tests-contract run test`、`pnpm --dir packages/sdk-ts run generate && pnpm --dir packages/sdk-ts run generate:check`。
 - [x] 2026-02-17 11:34 +0800 聊天工具调用顺序渲染修复：Web 聊天消息改为按流式事件时间线渲染（支持“文本 -> 工具 -> 文本”交错），不再将工具调用统一压在消息底部。
 - [x] 2026-02-17 11:34 +0800 验证通过：`pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts`、`pnpm -C apps/web build`。
 - [x] 2026-02-17 11:27 +0800 聊天工具调用持久化修复：Gateway 将 `tool_call` 原始事件与文本/工具顺序写入 assistant `metadata`（`tool_call_notices`/`text_order`/`tool_order`），Web 打开历史会话时从 metadata 恢复工具调用展示，刷新后不再丢失。
 - [x] 2026-02-17 11:27 +0800 验证通过：`cd apps/gateway && go test ./...`、`pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts`、`pnpm -C apps/web build`。
 - [x] 2026-02-17 11:25 +0800 QQ 频道接入完成：Gateway 新增静态 `qq` channel 插件（token 获取与缓存、`c2c/group/guild` 发送、`bot_prefix` 支持），`/config/channels` 默认配置与契约文档同步补齐。
-- [x] 2026-02-17 11:25 +0800 验证通过：`cd apps/gateway && go test ./...`、`pnpm --filter @copaw-next/tests-contract run lint`、`pnpm --filter @copaw-next/tests-contract run test`。
+- [x] 2026-02-17 11:25 +0800 验证通过：`cd apps/gateway && go test ./...`、`pnpm --filter @nextai/tests-contract run lint`、`pnpm --filter @nextai/tests-contract run test`。
 - [x] 2026-02-17 11:23 +0800 聊天消息渲染顺序修复：Web 聊天区改为按输出先后展示（谁先输出谁在上），不再固定工具块总在顶部；补充 e2e 覆盖“文本先到时文本在上、工具后到时工具在下”的顺序断言。
 - [x] 2026-02-17 11:23 +0800 验证通过：`pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts` 与 `pnpm -C apps/web build`。
 - [x] 实际运行验证通过：Gateway 可启动并通过 `/healthz`、`/version`、`/chats`；CLI 可跑通 chat/cron；Web 静态服务可访问。
@@ -64,7 +196,7 @@
 - [x] 2026-02-16 14:03 +0800 模型配置扩展验证：新增 Provider 弹窗“自定义模型配置”可视化选项（模型 ID 增删行），提交时并入 `model_aliases`；后端补齐 custom provider alias 解析与模型展示；执行 `pnpm -C apps/web test`、`pnpm -C apps/web build`、`cd apps/gateway && go test ./internal/provider ./internal/app` 均通过。
 - [x] 2026-02-16 14:08 +0800 Provider 策略调整验证：移除内置 `demo` 提供商（默认 state 与迁移加载均不再保留），`/agent/process` 在未配置激活模型时改为内部 demo 回声兜底；执行 `cd apps/gateway && go test ./internal/provider ./internal/repo ./internal/app`、`pnpm -C apps/web test`、`pnpm -C apps/web build` 均通过。
 - [x] 2026-02-16 14:16 +0800 Provider 拟态弹窗交互调整验证：`Provider ID` 改为 `Provider type` 下拉，仅可选择现有接口类型（`openai`、`openai Compatible`）；编辑模式保留原 provider_id 并锁定类型；执行 `pnpm -C apps/web test` 与 `pnpm -C apps/web build` 均通过。
-- [x] 2026-02-16 14:24 +0800 Provider 类型与删空回退修复验证：`/models/catalog` 新增 `provider_types`，Web 改为动态读取接口类型（不再硬编码）；补充“删除全部 provider 后 `/agent/process` 仍走 demo 回声兜底”回归测试；执行 `cd apps/gateway && go test ./internal/provider ./internal/app ./internal/repo`、`pnpm -C apps/web test`、`pnpm -C apps/web build`、`pnpm --filter @copaw-next/tests-contract run lint && pnpm --filter @copaw-next/tests-contract run test` 均通过。
+- [x] 2026-02-16 14:24 +0800 Provider 类型与删空回退修复验证：`/models/catalog` 新增 `provider_types`，Web 改为动态读取接口类型（不再硬编码）；补充“删除全部 provider 后 `/agent/process` 仍走 demo 回声兜底”回归测试；执行 `cd apps/gateway && go test ./internal/provider ./internal/app ./internal/repo`、`pnpm -C apps/web test`、`pnpm -C apps/web build`、`pnpm --filter @nextai/tests-contract run lint && pnpm --filter @nextai/tests-contract run test` 均通过。
 - [x] 2026-02-16 14:36 +0800 Web Provider 自定义模型联动修复验证：`openai` 类型下禁用并隐藏“自定义模型配置”，保存时仅对非内置 provider 提交 custom model IDs，避免“输入但看似未保存”的误导；执行 `pnpm -C apps/web test` 与 `pnpm -C apps/web build` 均通过。
 - [x] 2026-02-16 14:39 +0800 服务重启验证：已重启 Gateway（`make gateway`）与 Web（`python3 -m http.server 5173`）；`/healthz`、`/version` 与 Web `HEAD /` 均返回 200/正常结果。
 - [x] 2026-02-16 14:46 +0800 Web 模型与会话显示修复验证：Models 面板补回“激活模型”可视化入口（provider/model 下拉 + 手动覆盖 + `PUT /models/active`），并修复会话列表按钮布局为纵向分行；执行 `pnpm -C apps/web test` 与 `pnpm -C apps/web build` 均通过。
@@ -73,15 +205,15 @@
 - [x] 2026-02-16 17:39 +0800 服务重启验证：再次重启 Gateway（`make gateway`）与 Web（`python3 -m http.server 5173`）；`/healthz`、`/version` 与 Web `HEAD /` 均返回正常结果。
 - [x] 2026-02-16 17:43 +0800 Web 聊天自动激活模型修复验证：页面启动与模型刷新时若 `active_llm` 为空且存在“启用 + 已配置 API Key + 有模型”的 provider，则自动调用 `PUT /models/active` 设定激活模型，避免聊天误走 `Echo` 兜底；执行 `pnpm -C apps/web test`（13 tests）与 `pnpm -C apps/web build` 均通过。
 - [x] 2026-02-16 18:10 +0800 安全审查复核：逐条复核 8 项网关安全/稳定性风险（鉴权默认放行、SSRF、workspace 资源耗尽、权限位、客户端鉴权头、channels 并发 map、JSON 体积上限、request-id 日志），确认均可由当前代码路径触发；按“体验影响优先”建议主清单保留 1/2/3/5/7，4/6/8 作为次级改进项跟踪。
-- [x] 2026-02-16 19:07 +0800 安全整改落地：完成默认鉴权强制（`COPAW_API_KEY` 默认必填）、provider/webhook SSRF 防护、workspace 上传下载资源上限、JSON body 统一限流、CLI/Web `X-API-Key` 链路、store 权限位收紧、channels 并发 map 加锁、request-id 入日志；验证通过 `go test ./...`（apps/gateway）、`pnpm -C apps/cli test`、`pnpm -C apps/cli build`、`pnpm -C apps/web test`、`pnpm -C apps/web build`。
+- [x] 2026-02-16 19:07 +0800 安全整改落地：完成默认鉴权强制（`NEXTAI_API_KEY` 默认必填）、provider/webhook SSRF 防护、workspace 上传下载资源上限、JSON body 统一限流、CLI/Web `X-API-Key` 链路、store 权限位收紧、channels 并发 map 加锁、request-id 入日志；验证通过 `go test ./...`（apps/gateway）、`pnpm -C apps/cli test`、`pnpm -C apps/cli build`、`pnpm -C apps/web test`、`pnpm -C apps/web build`。
 - [x] 2026-02-16 19:39 +0800 Web 顶栏设置抽屉改造：将 API 地址/API Key/用户 ID/渠道/语言/刷新会话收纳到右上角设置图标弹层，支持点击图标打开、点击空白或按 Esc 关闭；执行 `pnpm -C apps/web test` 与 `pnpm -C apps/web build` 均通过。
-- [x] 2026-02-16 20:43 +0800 PR 分支回退操作：本地分支 `refactor/rename-copaw-to-nextai` 已回退到 `1c94b19`，并创建备份分支 `backup/pr5-before-rollback-20260216-1` 与 `stash@{0}` 保留现场；普通 `git push` 因非 fast-forward 被拒绝，强推命令（`--force-with-lease`/`+refspec`）受当前执行策略拦截，未能同步远端。
+- [x] 2026-02-16 20:43 +0800 PR 分支回退操作：本地分支 `refactor/rename-nextai-to-nextai` 已回退到 `1c94b19`，并创建备份分支 `backup/pr5-before-rollback-20260216-1` 与 `stash@{0}` 保留现场；普通 `git push` 因非 fast-forward 被拒绝，强推命令（`--force-with-lease`/`+refspec`）受当前执行策略拦截，未能同步远端。
 - [x] 2026-02-16 20:45 +0800 工作区安全清理：定位并备份 `apps/gateway/.data/workspace` 为 `apps/gateway/.data/workspace-backup-20260216-204506.tar.gz` 后删除并重建空目录；验证目录存在、权限为 `755`、当前为空。
 - [x] 2026-02-16 20:47 +0800 流程规范更新：`AGENTS.md` 开发流程新增“每次完成任务后必须提交对应 PR，未提交视为未完成；特殊豁免需在 TODO 记录原因”。
 - [x] 2026-02-16 20:47 +0800 服务重启验证：先停止端口占用进程（Gateway `pid=498972`、Web `pid=499049`），再启动 Gateway（`NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）与 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz`、`GET /version`、Web `HEAD /` 均返回 `200`。
 - [x] 2026-02-16 20:56 +0800 Web 技能区移除验证：删除前端 Skills 标签与面板、移除 `main.ts` 中技能状态/请求逻辑并同步 smoke 测试与 README；执行 `pnpm -C apps/web test`（13 tests）与 `pnpm -C apps/web build` 均通过。
-- [x] 2026-02-16 21:01 +0800 PR 提交记录：将“Web 技能区移除”提交为 `feat(web): remove skills panel from console`（`6bfd7b8`）并推送到分支 `refactor/rename-copaw-to-nextai`，已更新 GitHub PR `#5`。
-- [x] 2026-02-16 21:30 +0800 工作区重构落地：移除 `/workspace/download` 与 `/workspace/upload`，改为 `/workspace/files` + `/workspace/files/{file_path}` + `/workspace/export` + `/workspace/import`；CLI 改为 `workspace ls/cat/put/rm/export/import`，Web 工作区面板改为文件列表 + JSON 编辑 + 导入导出，契约与 SDK 同步更新；验证通过 `cd apps/gateway && go test ./...`、`pnpm -C apps/cli test && pnpm -C apps/cli build`、`pnpm -C apps/web test && pnpm -C apps/web build`、`pnpm --filter @copaw-next/tests-contract run lint && pnpm --filter @copaw-next/tests-contract run test`、`pnpm --dir packages/sdk-ts run lint && pnpm --dir packages/sdk-ts run test`。
+- [x] 2026-02-16 21:01 +0800 PR 提交记录：将“Web 技能区移除”提交为 `feat(web): remove skills panel from console`（`6bfd7b8`）并推送到分支 `refactor/rename-nextai-to-nextai`，已更新 GitHub PR `#5`。
+- [x] 2026-02-16 21:30 +0800 工作区重构落地：移除 `/workspace/download` 与 `/workspace/upload`，改为 `/workspace/files` + `/workspace/files/{file_path}` + `/workspace/export` + `/workspace/import`；CLI 改为 `workspace ls/cat/put/rm/export/import`，Web 工作区面板改为文件列表 + JSON 编辑 + 导入导出，契约与 SDK 同步更新；验证通过 `cd apps/gateway && go test ./...`、`pnpm -C apps/cli test && pnpm -C apps/cli build`、`pnpm -C apps/web test && pnpm -C apps/web build`、`pnpm --filter @nextai/tests-contract run lint && pnpm --filter @nextai/tests-contract run test`、`pnpm --dir packages/sdk-ts run lint && pnpm --dir packages/sdk-ts run test`。
 - [x] 2026-02-16 21:50 +0800 Web 工作区 404 诊断提示修复：命中 `404 page not found` 时不再直接回显原文，改为提示“当前 API 地址未提供 `/workspace/files`（请指向最新 Gateway）”；补充中英文 i18n 文案并仅在工作区相关操作生效；验证通过 `pnpm -C apps/web test`（13 tests）与 `pnpm -C apps/web build`。
 - [x] 2026-02-16 21:50 +0800 服务重启验证：采用持久会话重启 Gateway（`NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）与 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`。
 - [x] 2026-02-16 22:01 +0800 Web 工作区页面改名为配置页面：前端保留 `workspace` 逻辑与接口不变，仅将页面与 i18n 可见文案统一为“配置/Config”；验证通过 `pnpm -C apps/web test`（13 tests）与 `pnpm -C apps/web build`。
@@ -94,12 +226,27 @@
 - [x] 2026-02-17 11:29 +0800 服务重启验证：停止存量 Gateway/Web（含 `go run` 派生 `gateway` 进程）后重启 Gateway（`NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）与 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`。
 - [x] 2026-02-17 11:37 +0800 服务重启验证：再次停止存量 Gateway/Web（含 `go run` 派生 `gateway` 进程）后重启 Gateway（`NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）与 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`。
 - [x] 2026-02-17 11:44 +0800 服务重启验证：再次停止存量 Gateway/Web（含 `go run` 派生 `gateway` 进程）后重启 Gateway（`NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）与 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`。
+- [x] 2026-02-17 12:28 +0800 服务重启验证：再次停止存量 Gateway/Web（含 `go run` 派生 `gateway` 进程）后重启 Gateway（`NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）与 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`。
+- [x] 2026-02-17 12:34 +0800 服务重启验证：再次停止存量 Gateway/Web（含 `go run` 派生 `gateway` 进程）后重启 Gateway（`NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）与 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`。
+- [x] 2026-02-17 12:38 +0800 服务重启验证：再次停止存量 Gateway/Web（含 `go run` 派生 `gateway` 进程）后重启 Gateway（`NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）与 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`。
+- [x] 2026-02-17 12:44 +0800 服务重启验证：按指定方式去掉代理环境启动 Gateway（`env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）并保持 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）运行；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`，进程环境校验 `proxy_env_absent=yes`。
+- [x] 2026-02-17 13:04 +0800 服务重启验证：按指定方式去掉代理环境启动 Gateway（`env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）并保持 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）运行；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`，进程环境校验 `proxy_env_absent=yes`。
+- [x] 2026-02-17 13:23 +0800 服务重启验证：按指定方式去掉代理环境启动 Gateway（`env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）并重启 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`，进程环境校验 `proxy_env_absent=yes`。
+- [x] 2026-02-17 13:29 +0800 服务重启验证：按指定方式去掉代理环境启动 Gateway（`env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）并重启 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`，进程环境校验 `proxy_env_absent=yes`。
+- [x] 2026-02-17 13:35 +0800 服务重启验证：按指定方式去掉代理环境启动 Gateway（`env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）并重启 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`，进程环境校验 `proxy_env_absent=yes`。
+- [x] 2026-02-17 15:33 +0800 服务重启验证：按指定方式去掉代理环境启动 Gateway（`env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）并重启 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`，进程环境校验 `proxy_env_absent=yes`。
+- [x] 2026-02-17 14:58 +0800 服务重启验证：按指定方式去掉代理环境启动 Gateway（`env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）并重启 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`，进程环境校验 `proxy_env_absent=yes`。
+- [x] 2026-02-17 15:11 +0800 服务重启验证：按指定方式去掉代理环境启动 Gateway（`env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）并重启 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`，进程环境校验 `proxy_env_absent=yes`。
+- [x] 2026-02-17 15:18 +0800 服务重启验证：按指定方式去掉代理环境启动 Gateway（`env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）并重启 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`，进程环境校验 `proxy_env_absent=yes`。
+- [x] 2026-02-17 15:30 +0800 服务重启验证：按指定方式去掉代理环境启动 Gateway（`env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）并重启 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`，进程环境校验 `proxy_env_absent=yes`。
+- [x] 2026-02-17 13:14 +0800 Web QQ 会话展示修复：聊天列表在 `channel=qq` 时不再携带 `user_id` 过滤，避免入站会话因 `openid` 与控制台 `user_id` 不一致而被隐藏；发送后会话匹配在 QQ 渠道改为按 `session_id+channel`。
+- [x] 2026-02-17 13:14 +0800 验证通过：`pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts`、`pnpm -C apps/web build`。
 
-## 7. 当前未完成项与阻塞（2026-02-17 11:54:49 +0800）
+## 7. 当前未完成项与阻塞（2026-02-17 15:30:39 +0800）
 - [x] 设计并实现 provider 可删除方案（含内置 provider），并完成 catalog/active/default 语义调整：删除后从 `/models/catalog` 消失；删掉激活 provider 后 `active_llm` 置空。
 - [x] 风险已消除：删除全部 provider 后，`/agent/process` 在 `active_llm` 为空时走内部 demo 回声兜底；并有回归测试覆盖（`apps/gateway/internal/app/server_test.go`）。
 - [ ] 阻塞：无法将 PR 分支远端回退到 `1c94b19`。原因：当前环境策略禁止强推（`git push --force-with-lease` 与 `git push origin +ref` 均被 policy 拦截）；仅普通 `git push` 可执行但因 non-fast-forward 被拒绝。
-- [x] 待办已关闭：`/workspace` 重构改动已提交为 `eca30a5` 与 `74c31f9`，并已推送分支 `refactor/rename-copaw-to-nextai`（见最近提交记录）。
+- [x] 待办已关闭：`/workspace` 重构改动已提交为 `eca30a5` 与 `74c31f9`，并已推送分支 `refactor/rename-nextai-to-nextai`（见最近提交记录）。
 - [x] 待办已关闭：Web 工作区 404 诊断提示修复已提交为 `603906c`。
 
-- [x] 2026-02-16 23:42 +0800 Agent 多步自治链路落地：`/agent/process` 支持模型 `tool_calls` 循环与结构化事件流（`step_started`/`tool_call`/`tool_result`/`assistant_delta`/`completed`）；Web 聊天区新增 Agent 事件流展示并保留 `delta + [DONE]` 兼容；验证通过 `cd apps/gateway && go test ./...`、`pnpm -C apps/web test`、`pnpm -C apps/web build`、`pnpm --filter @copaw-next/tests-contract run lint && pnpm --filter @copaw-next/tests-contract run test`。
+- [x] 2026-02-16 23:42 +0800 Agent 多步自治链路落地：`/agent/process` 支持模型 `tool_calls` 循环与结构化事件流（`step_started`/`tool_call`/`tool_result`/`assistant_delta`/`completed`）；Web 聊天区新增 Agent 事件流展示并保留 `delta + [DONE]` 兼容；验证通过 `cd apps/gateway && go test ./...`、`pnpm -C apps/web test`、`pnpm -C apps/web build`、`pnpm --filter @nextai/tests-contract run lint && pnpm --filter @nextai/tests-contract run test`。

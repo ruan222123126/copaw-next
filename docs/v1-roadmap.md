@@ -1,4 +1,4 @@
-# CoPaw Next v1 路线图
+# NextAI v1 路线图
 
 ## Week 1：骨架与契约
 - Monorepo 初始化

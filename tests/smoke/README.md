@@ -16,5 +16,5 @@ pnpm test
 夜间 live（真实 provider）：
 
 ```bash
-COPAW_LIVE_OPENAI_API_KEY=... pnpm test -- --test-name-pattern "nightly live provider chain"
+NEXTAI_LIVE_OPENAI_API_KEY=... pnpm test -- --test-name-pattern "nightly live provider chain"
 ```

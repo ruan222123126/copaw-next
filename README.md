@@ -1,6 +1,6 @@
-# CoPaw Next
+# NextAI
 
-CoPaw Next 是一个以 `copaw-local` 功能范围为目标、以 `openclaw` 工程方法为标杆的全新开源项目。
+NextAI 是一个以 `nextai-local` 功能范围为目标、以 `openclaw` 工程方法为标杆的全新开源项目。
 
 ## 目录
 

@@ -13,7 +13,7 @@ test("gateway chat flow e2e: create -> stream send -> history", { timeout: 90_00
   debug("allocate port");
   const port = await getFreePort();
   debug(`port=${port}`);
-  const dataDir = await mkdtemp(join(tmpdir(), "copaw-smoke-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "nextai-smoke-"));
   const gatewayBin = join(dataDir, "gateway-smoke");
   const baseURL = `http://127.0.0.1:${port}`;
 
@@ -27,9 +27,9 @@ test("gateway chat flow e2e: create -> stream send -> history", { timeout: 90_00
     cwd: gatewayDir,
     env: {
       ...process.env,
-      COPAW_HOST: "127.0.0.1",
-      COPAW_PORT: String(port),
-      COPAW_DATA_DIR: dataDir,
+      NEXTAI_HOST: "127.0.0.1",
+      NEXTAI_PORT: String(port),
+      NEXTAI_DATA_DIR: dataDir,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -119,7 +119,7 @@ test("gateway chat flow e2e: create -> stream send -> history", { timeout: 90_00
 
 test("gateway SSE boundary e2e: delta stream ends with DONE", { timeout: 90_000 }, async () => {
   const port = await getFreePort();
-  const dataDir = await mkdtemp(join(tmpdir(), "copaw-smoke-sse-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "nextai-smoke-sse-"));
   const gatewayBin = join(dataDir, "gateway-smoke");
   const baseURL = `http://127.0.0.1:${port}`;
 
@@ -131,9 +131,9 @@ test("gateway SSE boundary e2e: delta stream ends with DONE", { timeout: 90_000 
     cwd: gatewayDir,
     env: {
       ...process.env,
-      COPAW_HOST: "127.0.0.1",
-      COPAW_PORT: String(port),
-      COPAW_DATA_DIR: dataDir,
+      NEXTAI_HOST: "127.0.0.1",
+      NEXTAI_PORT: String(port),
+      NEXTAI_DATA_DIR: dataDir,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -179,7 +179,7 @@ test("gateway SSE boundary e2e: delta stream ends with DONE", { timeout: 90_000 
 
 test("gateway error code consistency e2e: invalid request and unsupported channel", { timeout: 90_000 }, async () => {
   const port = await getFreePort();
-  const dataDir = await mkdtemp(join(tmpdir(), "copaw-smoke-errors-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "nextai-smoke-errors-"));
   const gatewayBin = join(dataDir, "gateway-smoke");
   const baseURL = `http://127.0.0.1:${port}`;
 
@@ -191,9 +191,9 @@ test("gateway error code consistency e2e: invalid request and unsupported channe
     cwd: gatewayDir,
     env: {
       ...process.env,
-      COPAW_HOST: "127.0.0.1",
-      COPAW_PORT: String(port),
-      COPAW_DATA_DIR: dataDir,
+      NEXTAI_HOST: "127.0.0.1",
+      NEXTAI_PORT: String(port),
+      NEXTAI_DATA_DIR: dataDir,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -246,7 +246,7 @@ test("gateway error code consistency e2e: invalid request and unsupported channe
 
 test("gateway cron concurrency e2e: pre-existing lease returns cron_busy", { timeout: 90_000 }, async () => {
   const port = await getFreePort();
-  const dataDir = await mkdtemp(join(tmpdir(), "copaw-smoke-concurrency-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "nextai-smoke-concurrency-"));
   const gatewayBin = join(dataDir, "gateway-smoke");
   const baseURL = `http://127.0.0.1:${port}`;
 
@@ -258,9 +258,9 @@ test("gateway cron concurrency e2e: pre-existing lease returns cron_busy", { tim
     cwd: gatewayDir,
     env: {
       ...process.env,
-      COPAW_HOST: "127.0.0.1",
-      COPAW_PORT: String(port),
-      COPAW_DATA_DIR: dataDir,
+      NEXTAI_HOST: "127.0.0.1",
+      NEXTAI_PORT: String(port),
+      NEXTAI_DATA_DIR: dataDir,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -323,7 +323,7 @@ test("gateway cron concurrency e2e: pre-existing lease returns cron_busy", { tim
 
 test("gateway cron DST boundary e2e: timezone next_run_at is deterministic", { timeout: 90_000 }, async () => {
   const port = await getFreePort();
-  const dataDir = await mkdtemp(join(tmpdir(), "copaw-smoke-dst-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "nextai-smoke-dst-"));
   const gatewayBin = join(dataDir, "gateway-smoke");
   const baseURL = `http://127.0.0.1:${port}`;
   const timeZone = "America/New_York";
@@ -336,9 +336,9 @@ test("gateway cron DST boundary e2e: timezone next_run_at is deterministic", { t
     cwd: gatewayDir,
     env: {
       ...process.env,
-      COPAW_HOST: "127.0.0.1",
-      COPAW_PORT: String(port),
-      COPAW_DATA_DIR: dataDir,
+      NEXTAI_HOST: "127.0.0.1",
+      NEXTAI_PORT: String(port),
+      NEXTAI_DATA_DIR: dataDir,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

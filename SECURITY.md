@@ -4,8 +4,8 @@
 
 请不要在公开 issue 直接披露安全漏洞。
 
-- 邮件：`security@copaw.local`（如暂未启用，请通过仓库维护者私信）
-- 标题建议：`[copaw-next][security] <summary>`
+- 邮件：`security@nextai.local`（如暂未启用，请通过仓库维护者私信）
+- 标题建议：`[nextai][security] <summary>`
 - 建议包含：影响范围、复现步骤、风险等级、修复建议
 
 收到报告后，目标响应时效：
@@ -19,7 +19,7 @@
 - 严禁在业务代码、测试快照、文档示例中硬编码密钥。
 - 密钥仅可来自环境变量或 Secret Store。
 - 推荐环境变量：
-  - `COPAW_LIVE_OPENAI_API_KEY`
+  - `NEXTAI_LIVE_OPENAI_API_KEY`
   - `OPENAI_API_KEY`
 - 提交前应执行 secret scanning，并检查 `git diff` 中是否包含敏感值。
 

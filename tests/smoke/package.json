@@ -1,5 +1,5 @@
 {
-  "name": "@copaw-next/tests-smoke",
+  "name": "@nextai/tests-smoke",
   "private": true,
   "version": "0.1.0",
   "type": "module",

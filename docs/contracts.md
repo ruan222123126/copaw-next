@@ -5,6 +5,7 @@
 - /chats, /chats/{chat_id}, /chats/batch-delete
 - /agent/process
 - /channels/qq/inbound
+- /channels/qq/state
 - /cron/jobs 系列
 - /models 系列
 - /envs 系列
@@ -23,14 +24,15 @@
 - 回发目标按事件动态覆盖 `target_type/target_id`，无需写死在全局配置里。
 
 ## CLI
-- copaw app start
-- copaw chats list/create/get/delete/send
-- copaw cron list/create/update/delete/pause/resume/run/state
-- copaw models list/config/active-get/active-set
-- copaw env list/set/delete
-- copaw skills list/create/enable/disable/delete
-- copaw workspace ls/cat/put/rm/export/import
-- copaw channels list/types/get/set
+- nextai app start
+- nextai chats list/create/get/delete/send
+- nextai cron list/create/update/delete/pause/resume/run/state
+- nextai models list/config/active-get/active-set
+- nextai env list/set/delete
+- nextai skills list/create/enable/disable/delete
+- nextai workspace ls/cat/put/rm/export/import
+- nextai channels list/types/get/set
+- nextai tui
 
 ## /agent/process 多步 Agent 协议
 
@@ -38,6 +40,11 @@
 
 1. 常规对话（模型自治多步）
 2. 显式工具调用（推荐顶层 `view/edit/shell`，兼容 `biz_params.tool`；三者的值均为对象数组，单次操作也需传 1 个元素）
+
+特殊指令约定：
+
+- 当用户文本输入为 `/new`（忽略前后空白）时，Gateway 不调用模型，直接清理当前 `session_id + user_id + channel` 对应会话历史，并返回确认回复（流式/非流式均适用）。
+- `channel` 字段在 `/agent/process` 中为可选；若请求未显式传值则默认 `console`。QQ 入站路径固定使用 `channel=qq`。
 
 工具启用策略：
 
