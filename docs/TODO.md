@@ -1,6 +1,6 @@
 # CoPaw Next TODO
 
-更新时间：2026-02-17 11:47:11 +0800
+更新时间：2026-02-17 11:50:59 +0800
 
 ## 执行约定（强制）
 - 每位接手 AI 开始前，必须先阅读本文件与 `/home/ruan/.codex/handoff/latest.md`。
@@ -31,6 +31,8 @@
 ## 6. 实操验证（汇总）
 - [x] Go/TS 全量关键检查通过：`go test ./...`、`make gateway-coverage`、`pnpm -r lint/test/build`。
 - [x] 分模块验证通过：Web、CLI、Contracts、SDK 生成、Gateway provider 兼容性相关回归均已通过。
+- [x] 2026-02-17 11:50 +0800 构建产物清理：将 `apps/gateway/gateway` 从 Git 索引移除并加入 `.gitignore`，避免后续二进制再次被追踪（本地文件保留）。
+- [x] 2026-02-17 11:50 +0800 验证通过：`git check-ignore -v apps/gateway/gateway` 命中 `.gitignore` 规则。
 - [x] 2026-02-17 11:47 +0800 分批提交并推送完成：按 `CLI`、`Gateway+Contracts`、`Web+TODO` 三批提交到分支 `feat/agent-multi-step-events`，提交分别为 `c6fc522`、`8a5c139`、`ebcb162`。
 - [x] 2026-02-17 11:47 +0800 推送验证通过：`git push origin feat/agent-multi-step-events` 成功（`7a20578..ebcb162`）。
 - [x] 2026-02-17 11:44 +0800 Web 新增“QQ 渠道配置”面板：在配置页提供 `app_id/client_secret/target_type/target_id/api_base/token_url/timeout_seconds` 可视化编辑，直连 `/config/channels/qq` 读写。
@@ -89,7 +91,7 @@
 - [x] 2026-02-17 11:37 +0800 服务重启验证：再次停止存量 Gateway/Web（含 `go run` 派生 `gateway` 进程）后重启 Gateway（`NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）与 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`。
 - [x] 2026-02-17 11:44 +0800 服务重启验证：再次停止存量 Gateway/Web（含 `go run` 派生 `gateway` 进程）后重启 Gateway（`NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）与 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`。
 
-## 7. 当前未完成项与阻塞（2026-02-17 11:47:11 +0800）
+## 7. 当前未完成项与阻塞（2026-02-17 11:50:59 +0800）
 - [x] 设计并实现 provider 可删除方案（含内置 provider），并完成 catalog/active/default 语义调整：删除后从 `/models/catalog` 消失；删掉激活 provider 后 `active_llm` 置空。
 - [x] 风险已消除：删除全部 provider 后，`/agent/process` 在 `active_llm` 为空时走内部 demo 回声兜底；并有回归测试覆盖（`apps/gateway/internal/app/server_test.go`）。
 - [ ] 阻塞：无法将 PR 分支远端回退到 `1c94b19`。原因：当前环境策略禁止强推（`git push --force-with-lease` 与 `git push origin +ref` 均被 policy 拦截）；仅普通 `git push` 可执行但因 non-fast-forward 被拒绝。
