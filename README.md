@@ -66,6 +66,53 @@ python3 -m http.server 5173 --bind 127.0.0.1 --directory dist
 
 浏览器访问 `http://127.0.0.1:5173`。
 
+## 使用发布版（Release）
+
+适用场景：不想在目标机安装 Go/pnpm，只想直接运行构建产物。
+
+### 方式一：下载总包（推荐）
+
+1. 下载并解压（示例版本：`v0.1.0-rc.3`）
+
+```bash
+export NEXTAI_VERSION=v0.1.0-rc.3
+mkdir -p /opt/nextai && cd /opt/nextai
+curl -fL -o nextai-release-linux-amd64.tar.gz \
+  "https://github.com/ruan222123126/NextAI/releases/download/${NEXTAI_VERSION}/nextai-release-linux-amd64.tar.gz"
+tar -xzf nextai-release-linux-amd64.tar.gz
+```
+
+2. 启动 Gateway
+
+```bash
+cd /opt/nextai
+chmod +x gateway-linux-amd64
+NEXTAI_HOST=0.0.0.0 NEXTAI_PORT=8088 NEXTAI_DATA_DIR=/opt/nextai/.data ./gateway-linux-amd64
+```
+
+3. 启动 CLI（需要 Node.js `22+`）
+
+```bash
+cd /opt/nextai
+node cli/index.js --help
+node cli/index.js chats list --api-base http://127.0.0.1:8088
+```
+
+4. 启动 Web（静态文件）
+
+```bash
+cd /opt/nextai
+python3 -m http.server 5173 --bind 0.0.0.0 --directory web
+```
+
+### 方式二：按单独产物下载
+
+- `gateway-linux-amd64`：Gateway 可执行文件（Linux amd64）
+- `cli-dist.tar.gz`：CLI/TUI 构建产物（解压后用 `node index.js ...` 运行）
+- `web-dist.tar.gz`：Web 静态产物（解压后用 Nginx/Caddy/`http.server` 托管）
+
+这些产物都在 GitHub Release 附件中。
+
 ## 配置说明
 
 - `NEXTAI_HOST`：Gateway 监听地址（默认 `127.0.0.1`）

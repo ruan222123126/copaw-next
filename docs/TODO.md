@@ -1,6 +1,6 @@
 # NextAI TODO
 
-更新时间：2026-02-17 19:12:41 +0800
+更新时间：2026-02-17 19:18:44 +0800
 
 ## 执行约定（强制）
 - 每位接手 AI 开始前，必须先阅读本文件与 `/home/ruan/.codex/handoff/latest.md`。
@@ -29,6 +29,13 @@
 - [x] `docs/v1-roadmap.md`、`docs/contracts.md`、本地开发文档、部署文档与发布模板已完成。
 
 ## 6. 实操验证（汇总）
+- [x] 2026-02-17 19:18 +0800 README 发布版指南补齐：新增“使用发布版（Release）”章节，包含总包 `nextai-release-linux-amd64.tar.gz` 的下载、解压、Gateway/CLI/Web 启动步骤，以及单独产物说明。
+- [x] 2026-02-17 19:18 +0800 文档一致性检查：发布版章节与当前 release 产物命名保持一致（`gateway-linux-amd64`、`cli-dist.tar.gz`、`web-dist.tar.gz`、`nextai-release-linux-amd64.tar.gz`）。
+- [x] 2026-02-17 19:17 +0800 发布清理完成：已删除远端与本地 tag `v0.1.0-rc.2`（`git push origin :refs/tags/v0.1.0-rc.2`、`git tag -d v0.1.0-rc.2`），仅保留 `v0.1.0-rc.3`。
+- [x] 2026-02-17 19:17 +0800 校验通过：`git ls-remote --tags origin` 与 `gh release list` 均仅显示 `v0.1.0-rc.3`（`v0.1.0-rc.2` 已不存在）。
+- [x] 2026-02-17 19:17 +0800 Gateway 内置搜索插件落地：新增 `apps/gateway/internal/plugin/search.go`（`search` ToolPlugin），支持 `serpapi/tavily/brave` 多 provider 搜索 API，输入统一为 `items[].query/provider/count/timeout_seconds`，输出统一 `results(title/url/snippet/source)` 与可读文本摘要。
+- [x] 2026-02-17 19:17 +0800 网关接入与契约同步：更新 `apps/gateway/internal/app/server.go` 的工具注册（`NEXTAI_ENABLE_SEARCH_TOOL`）、`buildToolDefinition`、`parseShortcutToolCall`、`normalizeToolName`、`mapToolError`；同步 `.env.example`、`docs/contracts.md`、`docs/AI/ai-tools.md`、`docs/development.md`。
+- [x] 2026-02-17 19:17 +0800 验证通过：新增 `apps/gateway/internal/plugin/search_test.go` 与 `server_test` 搜索坏输入回归用例；执行 `cd apps/gateway && go test ./internal/plugin ./internal/app`、`cd apps/gateway && go test ./...` 均通过。
 - [x] 2026-02-17 19:12 +0800 发布阻塞修复：`apps/web/test/e2e/web-active-model-chat-flow.test.ts` 在“新增 openai-compatible provider”用例中新增前置等待（确保已有 provider 已渲染），消除 CI 时序抖动导致的偶发错误断言。
 - [x] 2026-02-17 19:12 +0800 发布前全量校验通过：执行 `cd apps/gateway && go test ./...`、`pnpm -r test`、`pnpm -r build` 全部通过（含 web e2e/cli/smoke/contract）。
 - [x] 2026-02-17 19:04 +0800 Skill 位置调整：按用户要求将上网搜索 skill 从 `~/.codex/skills/news` 移动到仓库目录 `docs/AI/news/SKILL.md`。
