@@ -1,6 +1,6 @@
 # NextAI TODO
 
-更新时间：2026-02-17 17:40:51 +0800
+更新时间：2026-02-17 19:47:01 +0800
 
 ## 执行约定（强制）
 - 每位接手 AI 开始前，必须先阅读本文件与 `/home/ruan/.codex/handoff/latest.md`。
@@ -29,6 +29,50 @@
 - [x] `docs/v1-roadmap.md`、`docs/contracts.md`、本地开发文档、部署文档与发布模板已完成。
 
 ## 6. 实操验证（汇总）
+- [x] 2026-02-17 19:47 +0800 发版前验证完成：执行 `cd apps/gateway && go test ./...` 与 `cd browser-agent-poc && pnpm run check` 均通过，满足本轮提交与发布前质量门禁。
+- [x] 2026-02-17 19:47 +0800 工作区统一提交准备完成：确认当前改动包含 Gateway `search/browser/.env` 支持、`browser-agent-poc` 目录与 README/Contracts/AI 文档同步，且未纳入本地敏感 `.env`。
+- [x] 2026-02-17 19:47 +0800 计划发布版本：基于已存在 `v0.1.0-rc.3`，本轮按序发布 `v0.1.0-rc.4`（通过 tag 触发 GitHub Release 自动附加总包）。
+- [x] 2026-02-17 19:41 +0800 Browser 文档回滚：按用户要求恢复 `docs/AI/ai-tools.md` 的 `browser` 工具条目与调用示例，不再删除 browser 能力说明。
+- [x] 2026-02-17 19:41 +0800 AGENTS 规则回滚：移除 `docs/AI/AGENTS.md` 中“默认禁用 browser 工具”条目，恢复为原规则集合。
+- [x] 2026-02-17 19:41 +0800 Browser 注释补充：在 `docs/AI/ai-tools.md` 的 `browser` 工具描述补充“若无须 AI 操作浏览器可不配置此能力”。
+- [x] 2026-02-17 19:37 +0800 README 接口兼容性提示强化：在浏览器代理配置段落明确“仅支持 OpenAI-compatible API 接口”，并补充“非兼容协议需先通过兼容层/网关转换”说明。
+- [x] 2026-02-17 19:36 +0800 README 浏览器部署说明细化：新增 `browser-agent-poc` 单独部署原因、目录要求、依赖安装、Playwright 运行时安装、Gateway 联动与自检步骤。
+- [x] 2026-02-17 19:36 +0800 README 浏览器模型配置细化：补充 `browser-agent-poc/.env` 中 `MODEL_API_KEY`、`MODEL_BASE_URL`、`MODEL_NAME` 的字段解释与示例。
+- [x] 2026-02-17 19:35 +0800 README 搜索 API 说明增强：明确 `search` 支持 `serpapi/tavily/brave` 三种 provider，补充各自环境变量映射、`NEXTAI_SEARCH_DEFAULT_PROVIDER` 留空自动选择规则、`items[].provider` 显式指定规则。
+- [x] 2026-02-17 19:35 +0800 README 浏览器依赖说明增强：补充 `browser` 需要单独部署 `browser-agent-poc`，并明确其 `.env` 必填 `MODEL_API_KEY`、`MODEL_BASE_URL`、`MODEL_NAME`。
+- [x] 2026-02-17 19:31 +0800 发布版配置简化：Gateway 启动新增自动读取 `.env`（默认当前目录），并支持 `NEXTAI_ENV_FILE=/path/to/env` 指定配置文件，保留“已有系统环境变量优先，不被 `.env` 覆盖”语义。
+- [x] 2026-02-17 19:31 +0800 配套测试与文档同步：新增 `apps/gateway/cmd/gateway/envfile_test.go` 覆盖默认 `.env`、显式路径、缺失文件三类场景；更新 `README.md` 发布版步骤与 `.env.example` 说明；发布流水线总包新增 `.env.example`（`.github/workflows/release.yml`）。
+- [x] 2026-02-17 19:31 +0800 验证通过：执行 `cd apps/gateway && go test ./...` 通过。
+- [x] 2026-02-17 19:24 +0800 已按用户提供密钥写入本地 `.env`：创建并更新 `NEXTAI_ENABLE_SEARCH_TOOL=true`、`NEXTAI_SEARCH_DEFAULT_PROVIDER=tavily`、`NEXTAI_SEARCH_TAVILY_KEY=<已填写>`，用于启用内置搜索插件的 Tavily provider。
+- [x] 2026-02-17 19:24 +0800 脱敏校验通过：`grep` 检查确认上述 3 个键存在（密钥值以掩码展示，未在日志明文输出）。
+- [x] 2026-02-17 19:18 +0800 README 发布版指南补齐：新增“使用发布版（Release）”章节，包含总包 `nextai-release-linux-amd64.tar.gz` 的下载、解压、Gateway/CLI/Web 启动步骤，以及单独产物说明。
+- [x] 2026-02-17 19:18 +0800 文档一致性检查：发布版章节与当前 release 产物命名保持一致（`gateway-linux-amd64`、`cli-dist.tar.gz`、`web-dist.tar.gz`、`nextai-release-linux-amd64.tar.gz`）。
+- [x] 2026-02-17 19:17 +0800 发布清理完成：已删除远端与本地 tag `v0.1.0-rc.2`（`git push origin :refs/tags/v0.1.0-rc.2`、`git tag -d v0.1.0-rc.2`），仅保留 `v0.1.0-rc.3`。
+- [x] 2026-02-17 19:17 +0800 校验通过：`git ls-remote --tags origin` 与 `gh release list` 均仅显示 `v0.1.0-rc.3`（`v0.1.0-rc.2` 已不存在）。
+- [x] 2026-02-17 19:17 +0800 Gateway 内置搜索插件落地：新增 `apps/gateway/internal/plugin/search.go`（`search` ToolPlugin），支持 `serpapi/tavily/brave` 多 provider 搜索 API，输入统一为 `items[].query/provider/count/timeout_seconds`，输出统一 `results(title/url/snippet/source)` 与可读文本摘要。
+- [x] 2026-02-17 19:17 +0800 网关接入与契约同步：更新 `apps/gateway/internal/app/server.go` 的工具注册（`NEXTAI_ENABLE_SEARCH_TOOL`）、`buildToolDefinition`、`parseShortcutToolCall`、`normalizeToolName`、`mapToolError`；同步 `.env.example`、`docs/contracts.md`、`docs/AI/ai-tools.md`、`docs/development.md`。
+- [x] 2026-02-17 19:17 +0800 验证通过：新增 `apps/gateway/internal/plugin/search_test.go` 与 `server_test` 搜索坏输入回归用例；执行 `cd apps/gateway && go test ./internal/plugin ./internal/app`、`cd apps/gateway && go test ./...` 均通过。
+- [x] 2026-02-17 19:12 +0800 发布阻塞修复：`apps/web/test/e2e/web-active-model-chat-flow.test.ts` 在“新增 openai-compatible provider”用例中新增前置等待（确保已有 provider 已渲染），消除 CI 时序抖动导致的偶发错误断言。
+- [x] 2026-02-17 19:12 +0800 发布前全量校验通过：执行 `cd apps/gateway && go test ./...`、`pnpm -r test`、`pnpm -r build` 全部通过（含 web e2e/cli/smoke/contract）。
+- [x] 2026-02-17 19:04 +0800 Skill 位置调整：按用户要求将上网搜索 skill 从 `~/.codex/skills/news` 移动到仓库目录 `docs/AI/news/SKILL.md`。
+- [x] 2026-02-17 19:04 +0800 验证通过：`ls -la /mnt/Files/NextAI/docs/AI/news` 显示 `SKILL.md` 存在，且 `test ! -e /home/ruan/.codex/skills/news` 校验源路径已移除。
+- [x] 2026-02-17 19:02 +0800 Skill 迁移：已将 `/mnt/Files/copaw-local/copaw/agents/skills/news/SKILL.md` 迁入本机 `~/.codex/skills/news/SKILL.md`，用于上网新闻检索场景。
+- [x] 2026-02-17 19:02 +0800 验证通过：`ls -la /home/ruan/.codex/skills/news` 与 `sed -n '1,80p' /home/ruan/.codex/skills/news/SKILL.md` 均输出预期内容。
+- [x] 2026-02-17 19:01 +0800 发布总包能力落地：更新 `.github/workflows/release.yml`，在原有 `gateway-linux-amd64`、`cli-dist.tar.gz`、`web-dist.tar.gz` 基础上新增 `nextai-release-linux-amd64.tar.gz` 聚合产物，并纳入 GitHub Release 附件列表。
+- [x] 2026-02-17 19:01 +0800 本地打包验证通过：执行同构脚本生成 `dist/nextai-release-linux-amd64.tar.gz`，内容包含 `gateway-linux-amd64`、`cli/*`、`web/*` 与 `release-template.md`。
+- [x] 2026-02-17 18:57 +0800 浏览器域名策略调整：`browser-agent-poc/agent.js` 将 `ALLOWED_HOSTS` 白名单改为 `BLOCKED_HOSTS` 黑名单，`open_url` 改为仅拦截命中黑名单域名（错误码 `domain_blocked`），未命中默认放行。
+- [x] 2026-02-17 18:57 +0800 配置与文档同步：更新 `browser-agent-poc/.env.example`、`browser-agent-poc/.env`、`browser-agent-poc/README.md` 的黑名单字段与描述。
+- [x] 2026-02-17 18:57 +0800 验证通过：执行 `cd browser-agent-poc && pnpm run check`（`node --check agent.js`）通过。
+- [x] 2026-02-17 18:42 +0800 Gateway 浏览器工具集成：新增 `apps/gateway/internal/plugin/browser.go`（`browser` ToolPlugin），按 `NEXTAI_ENABLE_BROWSER_TOOL=true` + `NEXTAI_BROWSER_AGENT_DIR=<agent.js目录>` 注册，支持 `items[].task/timeout_seconds`，通过本地 `node agent.js <task>` 驱动 Playwright 代理。
+- [x] 2026-02-17 18:42 +0800 契约与测试同步：更新 `server.go` 工具注册/定义、`parseShortcutToolCall`（新增顶层 `browser`）、`mapToolError` 浏览器输入错误映射；新增 `browser_test.go` 与 `TestProcessAgentRejectsBrowserToolWithoutTask`；更新 `docs/contracts.md`、`docs/AI/ai-tools.md`、`docs/development.md`。
+- [x] 2026-02-17 18:42 +0800 验证通过：`cd apps/gateway && go test ./internal/plugin ./internal/app`、`cd apps/gateway && go test ./...`。
+- [x] 2026-02-17 18:36 +0800 浏览器输入提速：`browser-agent-poc/agent.js` 的 `type` 工具由 `locator.type(text, { delay: 18 })` 改为 `locator.fill(text)`，消除逐字延迟输入，明显降低自动化动作耗时。
+- [x] 2026-02-17 18:36 +0800 验证通过：执行 `cd browser-agent-poc && pnpm run check`（`node --check agent.js`）通过。
+- [x] 2026-02-17 18:24 +0800 按用户提供配置更新 `browser-agent-poc/.env`：新增 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`，并同步映射到脚本使用的 `MODEL_API_KEY`、`MODEL_BASE_URL`；保留 `MODEL_NAME` 原值。
+- [x] 2026-02-17 18:24 +0800 校验通过：本地脱敏检查确认 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、`MODEL_API_KEY`、`MODEL_BASE_URL`、`MODEL_NAME` 均已写入且非空（未触发真实模型请求）。
+- [x] 2026-02-17 18:04 +0800 浏览器接管 PoC 落地：新增 `browser-agent-poc/agent.js` 单文件脚本（Node.js + Playwright + OpenAI-compatible Tool Calling），内置 `open_url/click/type/extract_text/screenshot/scroll` 六个工具、域名白名单、高危动作人工确认、步数/超时限制、JSONL 日志与失败截图。
+- [x] 2026-02-17 18:06 +0800 配套与验证：新增 `browser-agent-poc/package.json`、`browser-agent-poc/.env.example`、`browser-agent-poc/README.md`、`browser-agent-poc/.gitignore`；执行 `cd browser-agent-poc && pnpm install --ignore-workspace && pnpm run check` 与依赖导入校验 `cd browser-agent-poc && node -e "Promise.all([import('openai'),import('playwright'),import('dotenv'),import('zod')]).then(()=>console.log('deps-ok'))"` 通过（未执行真实模型/浏览器链路）。
+- [x] 2026-02-17 18:08 +0800 运行环境补齐与入口校验：执行 `cd browser-agent-poc && pnpm exec playwright install chromium` 完成浏览器运行时下载；执行 `cd browser-agent-poc && node agent.js "测试任务"` 返回预期错误 `缺少必填环境变量: MODEL_API_KEY`（启动路径正常）。
 - [x] 2026-02-17 17:40 +0800 文档同步更新：`README.md` 重写为可直接落地的快速开始与验证指引；`SECURITY.md` 精简漏洞提交流程段落；`docs/AI/AGENTS.md` 规则文案更新为简版约束。
 - [x] 2026-02-17 17:40 +0800 验证通过：`cd apps/gateway && go test ./internal/app`、`cd apps/gateway && go test ./...`（文档改动本身未触发额外构建）。
 - [x] 2026-02-17 17:37 +0800 Gateway 提示词拼装修复：`/agent/process` 调模型时的 system 提示由“仅注入 `docs/AI/AGENTS.md`”改为“按顺序拼接 `docs/AI/AGENTS.md` + `docs/AI/ai-tools.md`”，确保工具使用规范与总规则同时下发给模型。

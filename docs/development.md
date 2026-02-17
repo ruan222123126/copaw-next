@@ -21,6 +21,28 @@ cd apps/gateway
 go run ./cmd/gateway
 ```
 
+启用浏览器工具（可选）：
+
+```bash
+export NEXTAI_ENABLE_BROWSER_TOOL=true
+export NEXTAI_BROWSER_AGENT_DIR=/mnt/Files/NextAI/browser-agent-poc
+cd apps/gateway
+go run ./cmd/gateway
+```
+
+启用搜索工具（可选，多 provider）：
+
+```bash
+export NEXTAI_ENABLE_SEARCH_TOOL=true
+export NEXTAI_SEARCH_DEFAULT_PROVIDER=serpapi
+export NEXTAI_SEARCH_SERPAPI_KEY=your_serpapi_key
+# 可选 provider（按需至少配置一个）
+# export NEXTAI_SEARCH_TAVILY_KEY=your_tavily_key
+# export NEXTAI_SEARCH_BRAVE_KEY=your_brave_key
+cd apps/gateway
+go run ./cmd/gateway
+```
+
 2. 单独开发 CLI
 
 ```bash

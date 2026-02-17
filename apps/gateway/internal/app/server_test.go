@@ -1542,6 +1542,79 @@ func TestProcessAgentRejectsSingleShellObjectInput(t *testing.T) {
 	}
 }
 
+func TestProcessAgentRejectsBrowserToolWithoutTask(t *testing.T) {
+	t.Setenv("NEXTAI_ENABLE_BROWSER_TOOL", "true")
+	agentDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(agentDir, "agent.js"), []byte("// test"), 0o644); err != nil {
+		t.Fatalf("seed browser agent entry failed: %v", err)
+	}
+	t.Setenv("NEXTAI_BROWSER_AGENT_DIR", agentDir)
+
+	srv := newTestServer(t)
+	procReq := `{
+		"input":[{"role":"user","type":"message","content":[{"type":"text","text":"browser object invalid"}]}],
+		"session_id":"s-browser-object-invalid",
+		"user_id":"u-browser-object-invalid",
+		"channel":"console",
+		"stream":false,
+		"biz_params":{"tool":{"name":"browser","items":[{}]}}
+	}`
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/agent/process", strings.NewReader(procReq)))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"code":"invalid_tool_input"`) {
+		t.Fatalf("unexpected body: %s", w.Body.String())
+	}
+}
+
+func TestProcessAgentRejectsSearchToolWithoutQuery(t *testing.T) {
+	t.Setenv("NEXTAI_ENABLE_SEARCH_TOOL", "true")
+	t.Setenv("NEXTAI_SEARCH_SERPAPI_KEY", "test-key")
+
+	srv := newTestServer(t)
+	procReq := `{
+		"input":[{"role":"user","type":"message","content":[{"type":"text","text":"search object invalid"}]}],
+		"session_id":"s-search-object-invalid",
+		"user_id":"u-search-object-invalid",
+		"channel":"console",
+		"stream":false,
+		"biz_params":{"tool":{"name":"search","items":[{}]}}
+	}`
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/agent/process", strings.NewReader(procReq)))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"code":"invalid_tool_input"`) {
+		t.Fatalf("unexpected body: %s", w.Body.String())
+	}
+}
+
+func TestProcessAgentRejectsSearchToolWithUnsupportedProvider(t *testing.T) {
+	t.Setenv("NEXTAI_ENABLE_SEARCH_TOOL", "true")
+	t.Setenv("NEXTAI_SEARCH_SERPAPI_KEY", "test-key")
+
+	srv := newTestServer(t)
+	procReq := `{
+		"input":[{"role":"user","type":"message","content":[{"type":"text","text":"search provider invalid"}]}],
+		"session_id":"s-search-provider-invalid",
+		"user_id":"u-search-provider-invalid",
+		"channel":"console",
+		"stream":false,
+		"biz_params":{"tool":{"name":"search","items":[{"query":"nextai","provider":"duckduckgo"}]}}
+	}`
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/agent/process", strings.NewReader(procReq)))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"code":"invalid_tool_input"`) {
+		t.Fatalf("unexpected body: %s", w.Body.String())
+	}
+}
+
 func TestProcessAgentRunsMultiStepAgentLoop(t *testing.T) {
 	var calls int
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

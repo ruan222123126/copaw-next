@@ -10,6 +10,12 @@ import (
 )
 
 func main() {
+	if path, loaded, err := loadEnvFile(); err != nil {
+		log.Printf("load env file failed: path=%s err=%v", path, err)
+	} else if loaded > 0 {
+		log.Printf("loaded %d env values from %s", loaded, path)
+	}
+
 	cfg := config.Load()
 	srv, err := app.NewServer(cfg)
 	if err != nil {

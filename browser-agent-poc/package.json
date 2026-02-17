@@ -1,0 +1,17 @@
+{
+  "name": "browser-agent-poc",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Single-file browser agent with Playwright + Tool Calling",
+  "scripts": {
+    "start": "node agent.js",
+    "check": "node --check agent.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "openai": "^6.6.0",
+    "playwright": "^1.56.1",
+    "zod": "^4.1.5"
+  }
+}

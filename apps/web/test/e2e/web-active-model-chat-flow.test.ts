@@ -288,6 +288,14 @@ describe("web e2e: set active model then send chat", () => {
     expect(modelsTabButton).not.toBeNull();
     modelsTabButton?.click();
 
+    await waitFor(() =>
+      Boolean(
+        document.querySelector<HTMLButtonElement>(
+          `button[data-provider-action="edit"][data-provider-id="${existingProviderID}"]`,
+        ),
+      ),
+    );
+
     const addProviderButton = document.getElementById("models-add-provider-btn") as HTMLButtonElement;
     addProviderButton.click();
 

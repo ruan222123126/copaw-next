@@ -66,6 +66,13 @@ jobs:
           tar -czf "$GITHUB_WORKSPACE/dist/cli-dist.tar.gz" -C "$GITHUB_WORKSPACE/apps/cli/dist" .
           cd "$GITHUB_WORKSPACE/apps/web" && pnpm build
           tar -czf "$GITHUB_WORKSPACE/dist/web-dist.tar.gz" -C "$GITHUB_WORKSPACE/apps/web/dist" .
+          mkdir -p "$GITHUB_WORKSPACE/dist/bundle/cli" "$GITHUB_WORKSPACE/dist/bundle/web"
+          cp "$GITHUB_WORKSPACE/dist/gateway-linux-amd64" "$GITHUB_WORKSPACE/dist/bundle/"
+          tar -xzf "$GITHUB_WORKSPACE/dist/cli-dist.tar.gz" -C "$GITHUB_WORKSPACE/dist/bundle/cli"
+          tar -xzf "$GITHUB_WORKSPACE/dist/web-dist.tar.gz" -C "$GITHUB_WORKSPACE/dist/bundle/web"
+          cp "$GITHUB_WORKSPACE/.env.example" "$GITHUB_WORKSPACE/dist/bundle/.env.example"
+          cp "$GITHUB_WORKSPACE/docs/release-template.md" "$GITHUB_WORKSPACE/dist/bundle/release-template.md"
+          tar -czf "$GITHUB_WORKSPACE/dist/nextai-release-linux-amd64.tar.gz" -C "$GITHUB_WORKSPACE/dist/bundle" .
           cp "$GITHUB_WORKSPACE/docs/release-template.md" "$GITHUB_WORKSPACE/dist/release-template.md"
 
       - name: Publish GitHub Release
@@ -77,4 +84,5 @@ jobs:
             dist/gateway-linux-amd64
             dist/cli-dist.tar.gz
             dist/web-dist.tar.gz
+            dist/nextai-release-linux-amd64.tar.gz
             dist/release-template.md

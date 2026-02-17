@@ -52,6 +52,9 @@ const (
 	aiToolsGuideLegacyV0RelativePath = "docs/ai-tools.md"
 	aiToolsGuidePathEnv              = "NEXTAI_AI_TOOLS_GUIDE_PATH"
 	disabledToolsEnv                 = "NEXTAI_DISABLED_TOOLS"
+	enableBrowserToolEnv             = "NEXTAI_ENABLE_BROWSER_TOOL"
+	browserToolAgentDirEnv           = "NEXTAI_BROWSER_AGENT_DIR"
+	enableSearchToolEnv              = "NEXTAI_ENABLE_SEARCH_TOOL"
 	disableQQInboundSupervisorEnv    = "NEXTAI_DISABLE_QQ_INBOUND_SUPERVISOR"
 
 	replyChunkSizeDefault = 12
@@ -109,6 +112,20 @@ func NewServer(cfg config.Config) (*Server, error) {
 	srv.registerToolPlugin(plugin.NewShellTool())
 	srv.registerToolPlugin(plugin.NewViewFileLinesTool(""))
 	srv.registerToolPlugin(plugin.NewEditFileLinesTool(""))
+	if parseBool(os.Getenv(enableBrowserToolEnv)) {
+		browserTool, toolErr := plugin.NewBrowserTool(strings.TrimSpace(os.Getenv(browserToolAgentDirEnv)))
+		if toolErr != nil {
+			return nil, fmt.Errorf("init browser tool failed: %w", toolErr)
+		}
+		srv.registerToolPlugin(browserTool)
+	}
+	if parseBool(os.Getenv(enableSearchToolEnv)) {
+		searchTool, toolErr := plugin.NewSearchToolFromEnv()
+		if toolErr != nil {
+			return nil, fmt.Errorf("init search tool failed: %w", toolErr)
+		}
+		srv.registerToolPlugin(searchTool)
+	}
 	srv.startCronScheduler()
 	if !parseBool(os.Getenv(disableQQInboundSupervisorEnv)) {
 		srv.startQQInboundSupervisor()
@@ -1548,6 +1565,80 @@ func buildToolDefinition(name string) runner.ToolDefinition {
 				"required": []string{"items"},
 			},
 		}
+	case "browser":
+		return runner.ToolDefinition{
+			Name:        "browser",
+			Description: "Delegate browser tasks to local Playwright agent script. input must be an array.",
+			Parameters: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"items": map[string]interface{}{
+						"type":        "array",
+						"description": "Array of browser tasks; pass one item for single task.",
+						"minItems":    1,
+						"items": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"task": map[string]interface{}{
+									"type":        "string",
+									"description": "Natural language task for browser agent.",
+								},
+								"timeout_seconds": map[string]interface{}{
+									"type":    "integer",
+									"minimum": 1,
+								},
+							},
+							"required":             []string{"task"},
+							"additionalProperties": false,
+						},
+					},
+				},
+				"required":             []string{"items"},
+				"additionalProperties": false,
+			},
+		}
+	case "search":
+		return runner.ToolDefinition{
+			Name:        "search",
+			Description: "Search the web via configured search APIs. input must be an array.",
+			Parameters: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"items": map[string]interface{}{
+						"type":        "array",
+						"description": "Array of search requests; pass one item for single query.",
+						"minItems":    1,
+						"items": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"query": map[string]interface{}{
+									"type":        "string",
+									"description": "Search query text.",
+								},
+								"provider": map[string]interface{}{
+									"type":        "string",
+									"description": "Optional provider override: serpapi | tavily | brave.",
+								},
+								"count": map[string]interface{}{
+									"type":        "integer",
+									"minimum":     1,
+									"description": "Optional max results per query.",
+								},
+								"timeout_seconds": map[string]interface{}{
+									"type":        "integer",
+									"minimum":     1,
+									"description": "Optional timeout for a single query.",
+								},
+							},
+							"required":             []string{"query"},
+							"additionalProperties": false,
+						},
+					},
+				},
+				"required":             []string{"items"},
+				"additionalProperties": false,
+			},
+		}
 	default:
 		return runner.ToolDefinition{
 			Name: name,
@@ -1822,7 +1913,7 @@ func parseShortcutToolCall(rawRequest map[string]interface{}) (toolCall, bool, e
 	if len(rawRequest) == 0 {
 		return toolCall{}, false, nil
 	}
-	shortcuts := []string{"view", "edit", "shell"}
+	shortcuts := []string{"view", "edit", "shell", "browser", "search"}
 	matched := make([]string, 0, 1)
 	for _, key := range shortcuts {
 		if raw, ok := rawRequest[key]; ok && raw != nil {
@@ -1866,6 +1957,10 @@ func normalizeToolName(name string) string {
 		return "view"
 	case "edit_file_lines", "edit_file_lins", "edit_file":
 		return "edit"
+	case "web_browser", "browser_use", "browser_tool":
+		return "browser"
+	case "web_search", "search_api", "search_tool":
+		return "search"
 	default:
 		return name
 	}
@@ -3966,6 +4061,18 @@ func mapToolError(err error) (status int, code string, message string) {
 				return http.StatusBadRequest, "invalid_tool_input", "tool input line range is out of file bounds"
 			case errors.Is(te.Err, plugin.ErrFileLinesToolFileNotFound):
 				return http.StatusBadRequest, "invalid_tool_input", "target file does not exist"
+			case errors.Is(te.Err, plugin.ErrBrowserToolItemsInvalid):
+				return http.StatusBadRequest, "invalid_tool_input", "tool input items must be a non-empty array of objects"
+			case errors.Is(te.Err, plugin.ErrBrowserToolTaskMissing):
+				return http.StatusBadRequest, "invalid_tool_input", "tool input task is required"
+			case errors.Is(te.Err, plugin.ErrSearchToolItemsInvalid):
+				return http.StatusBadRequest, "invalid_tool_input", "tool input items must be a non-empty array of objects"
+			case errors.Is(te.Err, plugin.ErrSearchToolQueryMissing):
+				return http.StatusBadRequest, "invalid_tool_input", "tool input query is required"
+			case errors.Is(te.Err, plugin.ErrSearchToolProviderUnsupported):
+				return http.StatusBadRequest, "invalid_tool_input", "tool input provider is unsupported"
+			case errors.Is(te.Err, plugin.ErrSearchToolProviderUnconfigured):
+				return http.StatusBadRequest, "invalid_tool_input", "tool input provider is not configured"
 			default:
 				return http.StatusBadGateway, te.Code, te.Message
 			}

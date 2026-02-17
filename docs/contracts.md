@@ -39,7 +39,7 @@
 `POST /agent/process` 支持两种模式：
 
 1. 常规对话（模型自治多步）
-2. 显式工具调用（推荐顶层 `view/edit/shell`，兼容 `biz_params.tool`；三者的值均为对象数组，单次操作也需传 1 个元素）
+2. 显式工具调用（推荐顶层 `view/edit/shell/browser/search`，兼容 `biz_params.tool`；上述工具的值均为对象数组，单次操作也需传 1 个元素）
 
 特殊指令约定：
 
@@ -51,6 +51,11 @@
 - 默认注册工具可用。
 - 通过环境变量 `NEXTAI_DISABLED_TOOLS`（逗号分隔，如 `shell,edit`）按名称禁用工具。
 - 当调用被禁用工具时，返回 `403` 与错误码 `tool_disabled`。
+- 浏览器工具默认关闭；需设置 `NEXTAI_ENABLE_BROWSER_TOOL=true`，并提供 `NEXTAI_BROWSER_AGENT_DIR`（指向 `agent.js` 所在目录）后才会注册。
+- 搜索工具默认关闭；需设置 `NEXTAI_ENABLE_SEARCH_TOOL=true`。支持多 provider（`serpapi` / `tavily` / `brave`），各 provider 通过环境变量配置 key（可选 base url）：
+  - `NEXTAI_SEARCH_SERPAPI_KEY` / `NEXTAI_SEARCH_SERPAPI_BASE_URL`
+  - `NEXTAI_SEARCH_TAVILY_KEY` / `NEXTAI_SEARCH_TAVILY_BASE_URL`
+  - `NEXTAI_SEARCH_BRAVE_KEY` / `NEXTAI_SEARCH_BRAVE_BASE_URL`
 
 请求示例：
 
