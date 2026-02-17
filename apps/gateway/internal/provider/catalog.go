@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"copaw-next/apps/gateway/internal/domain"
+	"nextai/apps/gateway/internal/domain"
 )
 
 const (

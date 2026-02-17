@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"copaw-next/apps/gateway/internal/domain"
-	"copaw-next/apps/gateway/internal/provider"
+	"nextai/apps/gateway/internal/domain"
+	"nextai/apps/gateway/internal/provider"
 )
 
 const (
@@ -34,6 +35,14 @@ type RunnerError struct {
 	Err     error
 }
 
+type InvalidToolCallError struct {
+	Index        int
+	CallID       string
+	Name         string
+	ArgumentsRaw string
+	Err          error
+}
+
 func (e *RunnerError) Error() string {
 	if e == nil {
 		return ""
@@ -49,6 +58,36 @@ func (e *RunnerError) Unwrap() error {
 		return nil
 	}
 	return e.Err
+}
+
+func (e *InvalidToolCallError) Error() string {
+	if e == nil {
+		return ""
+	}
+	name := strings.TrimSpace(e.Name)
+	detail := "invalid arguments"
+	if e.Err != nil {
+		detail = e.Err.Error()
+	}
+	if name != "" {
+		return fmt.Sprintf("provider tool call %q has invalid arguments: %s", name, detail)
+	}
+	return fmt.Sprintf("provider tool call[%d] has invalid arguments: %s", e.Index, detail)
+}
+
+func (e *InvalidToolCallError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func InvalidToolCallFromError(err error) (*InvalidToolCallError, bool) {
+	var invalidErr *InvalidToolCallError
+	if !errors.As(err, &invalidErr) || invalidErr == nil {
+		return nil, false
+	}
+	return invalidErr, true
 }
 
 type GenerateConfig struct {
@@ -713,7 +752,13 @@ func parseOpenAIToolCalls(in []openAIToolCall) ([]ToolCall, error) {
 		}
 		var arguments map[string]interface{}
 		if err := json.Unmarshal([]byte(argumentsRaw), &arguments); err != nil {
-			return nil, fmt.Errorf("provider tool call %q has invalid arguments: %w", name, err)
+			return nil, &InvalidToolCallError{
+				Index:        i,
+				CallID:       callID,
+				Name:         name,
+				ArgumentsRaw: argumentsRaw,
+				Err:          err,
+			}
 		}
 		if arguments == nil {
 			arguments = map[string]interface{}{}

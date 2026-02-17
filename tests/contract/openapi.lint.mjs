@@ -65,7 +65,7 @@ expect(agentProcessRequest?.properties?.input?.minItems === 1, "AgentProcessRequ
 expect(hasRequired(agentProcessRequest, "input"), "AgentProcessRequest.required 必须包含 input");
 expect(hasRequired(agentProcessRequest, "session_id"), "AgentProcessRequest.required 必须包含 session_id");
 expect(hasRequired(agentProcessRequest, "user_id"), "AgentProcessRequest.required 必须包含 user_id");
-expect(hasRequired(agentProcessRequest, "channel"), "AgentProcessRequest.required 必须包含 channel");
+expect(agentProcessRequest?.properties?.channel?.minLength === 1, "AgentProcessRequest.channel 必须设置 minLength=1");
 expect(hasRequired(agentProcessRequest, "stream"), "AgentProcessRequest.required 必须包含 stream");
 
 expect(Array.isArray(cronScheduleSpec?.properties?.type?.enum), "CronScheduleSpec.type 必须声明 enum");

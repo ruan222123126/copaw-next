@@ -12,6 +12,7 @@ const requiredPaths = [
   "/chats/{chat_id}",
   "/agent/process",
   "/channels/qq/inbound",
+  "/channels/qq/state",
   "/cron/jobs",
   "/models",
   "/models/catalog",

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"copaw-next/apps/gateway/internal/domain"
+	"nextai/apps/gateway/internal/domain"
 )
 
 type ProviderSetting struct {

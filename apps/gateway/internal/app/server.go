@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -23,14 +24,14 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	cronv3 "github.com/robfig/cron/v3"
 
-	"copaw-next/apps/gateway/internal/channel"
-	"copaw-next/apps/gateway/internal/config"
-	"copaw-next/apps/gateway/internal/domain"
-	"copaw-next/apps/gateway/internal/observability"
-	"copaw-next/apps/gateway/internal/plugin"
-	"copaw-next/apps/gateway/internal/provider"
-	"copaw-next/apps/gateway/internal/repo"
-	"copaw-next/apps/gateway/internal/runner"
+	"nextai/apps/gateway/internal/channel"
+	"nextai/apps/gateway/internal/config"
+	"nextai/apps/gateway/internal/domain"
+	"nextai/apps/gateway/internal/observability"
+	"nextai/apps/gateway/internal/plugin"
+	"nextai/apps/gateway/internal/provider"
+	"nextai/apps/gateway/internal/repo"
+	"nextai/apps/gateway/internal/runner"
 )
 
 const version = "0.1.0"
@@ -46,12 +47,21 @@ const (
 
 	cronLeaseDirName = "cron-leases"
 
-	aiToolsGuideRelativePath       = "docs/AI/ai-tools.md"
-	aiToolsGuideLegacyRelativePath = "docs/ai-tools.md"
-	aiToolsGuidePathEnv            = "NEXTAI_AI_TOOLS_GUIDE_PATH"
-	disabledToolsEnv               = "NEXTAI_DISABLED_TOOLS"
+	aiToolsGuideRelativePath         = "docs/AI/AGENTS.md"
+	aiToolsGuideLegacyRelativePath   = "docs/AI/ai-tools.md"
+	aiToolsGuideLegacyV0RelativePath = "docs/ai-tools.md"
+	aiToolsGuidePathEnv              = "NEXTAI_AI_TOOLS_GUIDE_PATH"
+	disabledToolsEnv                 = "NEXTAI_DISABLED_TOOLS"
+	disableQQInboundSupervisorEnv    = "NEXTAI_DISABLE_QQ_INBOUND_SUPERVISOR"
 
 	replyChunkSizeDefault = 12
+	contextResetCommand   = "/new"
+	contextResetReply     = "上下文已清理，已开始新会话。"
+
+	defaultProcessChannel = "console"
+	qqChannelName         = "qq"
+	channelSourceHeader   = "X-NextAI-Source"
+	qqInboundPath         = "/channels/qq/inbound"
 )
 
 var errCronJobNotFound = errors.New("cron_job_not_found")
@@ -65,6 +75,8 @@ type Server struct {
 	tools    map[string]plugin.ToolPlugin
 
 	disabledTools map[string]struct{}
+	qqInboundMu   sync.RWMutex
+	qqInbound     qqInboundRuntimeState
 
 	cronStop chan struct{}
 	cronDone chan struct{}
@@ -98,6 +110,9 @@ func NewServer(cfg config.Config) (*Server, error) {
 	srv.registerToolPlugin(plugin.NewViewFileLinesTool(""))
 	srv.registerToolPlugin(plugin.NewEditFileLinesTool(""))
 	srv.startCronScheduler()
+	if !parseBool(os.Getenv(disableQQInboundSupervisorEnv)) {
+		srv.startQQInboundSupervisor()
+	}
 	return srv, nil
 }
 
@@ -176,6 +191,7 @@ func (s *Server) Handler() http.Handler {
 
 	r.Post("/agent/process", s.processAgent)
 	r.Post("/channels/qq/inbound", s.processQQInbound)
+	r.Get("/channels/qq/state", s.getQQInboundState)
 
 	r.Route("/cron", func(r chi.Router) {
 		r.Get("/jobs", s.listCronJobs)
@@ -336,7 +352,7 @@ func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Request-Id")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Request-Id,X-NextAI-Source")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -567,10 +583,11 @@ func (s *Server) processAgentWithBody(w http.ResponseWriter, r *http.Request, bo
 		writeErr(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
 		return
 	}
-	if req.SessionID == "" || req.UserID == "" || req.Channel == "" {
-		writeErr(w, http.StatusBadRequest, "invalid_request", "session_id, user_id, channel are required", nil)
+	if req.SessionID == "" || req.UserID == "" {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "session_id and user_id are required", nil)
 		return
 	}
+	req.Channel = resolveProcessRequestChannel(r, req.Channel)
 	channelPlugin, channelCfg, channelName, err := s.resolveChannel(req.Channel)
 	if err != nil {
 		status, code, message := mapChannelError(err)
@@ -578,6 +595,24 @@ func (s *Server) processAgentWithBody(w http.ResponseWriter, r *http.Request, bo
 		return
 	}
 	req.Channel = channelName
+	if isContextResetCommand(req.Input) {
+		if err := s.clearChatContext(req.SessionID, req.UserID, req.Channel); err != nil {
+			writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
+			return
+		}
+		dispatchCfg := mergeChannelDispatchConfig(channelName, channelCfg, req.BizParams)
+		if err := channelPlugin.SendText(r.Context(), req.UserID, req.SessionID, contextResetReply, dispatchCfg); err != nil {
+			status, code, message := mapChannelError(&channelError{
+				Code:    "channel_dispatch_failed",
+				Message: fmt.Sprintf("failed to dispatch message to channel %q", channelName),
+				Err:     err,
+			})
+			writeErr(w, status, code, message, nil)
+			return
+		}
+		writeImmediateAgentResponse(w, req.Stream, contextResetReply)
+		return
+	}
 
 	aiToolsGuide, err := loadAIToolsGuide()
 	if err != nil {
@@ -585,9 +620,11 @@ func (s *Server) processAgentWithBody(w http.ResponseWriter, r *http.Request, bo
 		return
 	}
 
+	cronChatMeta := cronChatMetaFromBizParams(req.BizParams)
 	chatID := ""
 	activeLLM := domain.ModelSlotConfig{}
 	providerSetting := repo.ProviderSetting{}
+	historyInput := []domain.AgentInputMessage{}
 	if err := s.store.Write(func(state *repo.State) error {
 		for id, c := range state.Chats {
 			if c.SessionID == req.SessionID && c.UserID == req.UserID && c.Channel == req.Channel {
@@ -603,6 +640,16 @@ func (s *Server) processAgentWithBody(w http.ResponseWriter, r *http.Request, bo
 				Meta: map[string]interface{}{}, CreatedAt: now, UpdatedAt: now,
 			}
 		}
+		if len(cronChatMeta) > 0 {
+			chat := state.Chats[chatID]
+			if chat.Meta == nil {
+				chat.Meta = map[string]interface{}{}
+			}
+			for key, value := range cronChatMeta {
+				chat.Meta[key] = value
+			}
+			state.Chats[chatID] = chat
+		}
 		for _, input := range req.Input {
 			state.Histories[chatID] = append(state.Histories[chatID], domain.RuntimeMessage{
 				ID:      newID("msg"),
@@ -611,6 +658,7 @@ func (s *Server) processAgentWithBody(w http.ResponseWriter, r *http.Request, bo
 				Content: toRuntimeContents(input.Content),
 			})
 		}
+		historyInput = runtimeHistoryToAgentInputMessages(state.Histories[chatID])
 		activeLLM = state.ActiveLLM
 		activeLLM.ProviderID = normalizeProviderID(activeLLM.ProviderID)
 		providerSetting = getProviderSettingByID(state, activeLLM.ProviderID)
@@ -745,7 +793,11 @@ func (s *Server) processAgentWithBody(w http.ResponseWriter, r *http.Request, bo
 		}
 
 		effectiveReq := req
-		effectiveReq.Input = prependAIToolsGuide(req.Input, aiToolsGuide)
+		if len(historyInput) > 0 {
+			effectiveReq.Input = prependAIToolsGuide(historyInput, aiToolsGuide)
+		} else {
+			effectiveReq.Input = prependAIToolsGuide(req.Input, aiToolsGuide)
+		}
 		workflowInput := cloneAgentInputMessages(effectiveReq.Input)
 		step := 1
 
@@ -771,6 +823,55 @@ func (s *Server) processAgentWithBody(w http.ResponseWriter, r *http.Request, bo
 				turn, runErr = s.runner.GenerateTurn(r.Context(), turnReq, generateConfig, s.listToolDefinitions())
 			}
 			if runErr != nil {
+				if recoveredCall, recovered := recoverInvalidProviderToolCall(runErr, step); recovered {
+					appendEvent(domain.AgentEvent{
+						Type: "tool_call",
+						Step: step,
+						ToolCall: &domain.AgentToolCallPayload{
+							Name:  recoveredCall.Name,
+							Input: safeMap(recoveredCall.Input),
+						},
+					})
+					appendEvent(domain.AgentEvent{
+						Type: "tool_result",
+						Step: step,
+						ToolResult: &domain.AgentToolResultPayload{
+							Name:    recoveredCall.Name,
+							OK:      false,
+							Summary: summarizeAgentEventText(recoveredCall.Feedback),
+						},
+					})
+					workflowInput = append(workflowInput,
+						domain.AgentInputMessage{
+							Role:    "assistant",
+							Type:    "message",
+							Content: []domain.RuntimeContent{},
+							Metadata: map[string]interface{}{
+								"tool_calls": []map[string]interface{}{
+									{
+										"id":   recoveredCall.ID,
+										"type": "function",
+										"function": map[string]interface{}{
+											"name":      recoveredCall.Name,
+											"arguments": recoveredCall.RawArguments,
+										},
+									},
+								},
+							},
+						},
+						domain.AgentInputMessage{
+							Role:    "tool",
+							Type:    "message",
+							Content: []domain.RuntimeContent{{Type: "text", Text: recoveredCall.Feedback}},
+							Metadata: map[string]interface{}{
+								"tool_call_id": recoveredCall.ID,
+								"name":         recoveredCall.Name,
+							},
+						},
+					)
+					step++
+					continue
+				}
 				status, code, message := mapRunnerError(runErr)
 				streamFail(status, code, message, nil)
 				return
@@ -901,6 +1002,105 @@ func (s *Server) processAgentWithBody(w http.ResponseWriter, r *http.Request, bo
 
 	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	flusher.Flush()
+}
+
+func isContextResetCommand(input []domain.AgentInputMessage) bool {
+	for _, msg := range input {
+		if !strings.EqualFold(strings.TrimSpace(msg.Role), "user") {
+			continue
+		}
+		for _, part := range msg.Content {
+			text := strings.TrimSpace(part.Text)
+			if text == "" {
+				continue
+			}
+			return strings.EqualFold(text, contextResetCommand)
+		}
+	}
+	return false
+}
+
+func (s *Server) clearChatContext(sessionID, userID, channel string) error {
+	return s.store.Write(func(state *repo.State) error {
+		for chatID, spec := range state.Chats {
+			if spec.SessionID != sessionID || spec.UserID != userID || spec.Channel != channel {
+				continue
+			}
+			delete(state.Chats, chatID)
+			delete(state.Histories, chatID)
+		}
+		return nil
+	})
+}
+
+func writeImmediateAgentResponse(w http.ResponseWriter, streaming bool, reply string) {
+	if !streaming {
+		writeJSON(w, http.StatusOK, domain.AgentProcessResponse{
+			Reply: reply,
+			Events: []domain.AgentEvent{
+				{Type: "step_started", Step: 1},
+				{Type: "assistant_delta", Step: 1, Delta: reply},
+				{Type: "completed", Step: 1, Reply: reply},
+			},
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, "stream_not_supported", "streaming not supported", nil)
+		return
+	}
+
+	stepStartedPayload, _ := json.Marshal(domain.AgentEvent{
+		Type: "step_started",
+		Step: 1,
+	})
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", stepStartedPayload)
+	flusher.Flush()
+
+	for _, chunk := range splitReplyChunks(reply, replyChunkSizeDefault) {
+		deltaPayload, _ := json.Marshal(domain.AgentEvent{
+			Type:  "assistant_delta",
+			Step:  1,
+			Delta: chunk,
+		})
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", deltaPayload)
+		flusher.Flush()
+	}
+
+	completedPayload, _ := json.Marshal(domain.AgentEvent{
+		Type:  "completed",
+		Step:  1,
+		Reply: reply,
+	})
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", completedPayload)
+	flusher.Flush()
+
+	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	flusher.Flush()
+}
+
+func resolveProcessRequestChannel(r *http.Request, requestedChannel string) string {
+	if isQQInboundRequest(r) {
+		return qqChannelName
+	}
+	if requested := strings.ToLower(strings.TrimSpace(requestedChannel)); requested != "" {
+		return requested
+	}
+	return defaultProcessChannel
+}
+
+func isQQInboundRequest(r *http.Request) bool {
+	if r == nil || r.URL == nil {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(r.URL.Path)), qqInboundPath)
 }
 
 type qqInboundEvent struct {
@@ -1085,6 +1285,35 @@ func mergeChannelDispatchConfig(channelName string, cfg map[string]interface{}, 
 	return merged
 }
 
+func cronChatMetaFromBizParams(bizParams map[string]interface{}) map[string]interface{} {
+	if len(bizParams) == 0 {
+		return nil
+	}
+	raw, ok := bizParams["cron"]
+	if !ok || raw == nil {
+		return nil
+	}
+	cronPayload, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	jobID := strings.TrimSpace(qqString(cronPayload["job_id"]))
+	jobName := strings.TrimSpace(qqString(cronPayload["job_name"]))
+	if jobID == "" && jobName == "" {
+		return nil
+	}
+	meta := map[string]interface{}{
+		"source": "cron",
+	}
+	if jobID != "" {
+		meta["cron_job_id"] = jobID
+	}
+	if jobName != "" {
+		meta["cron_job_name"] = jobName
+	}
+	return meta
+}
+
 func qqMap(raw interface{}) (map[string]interface{}, bool) {
 	value, ok := raw.(map[string]interface{})
 	if !ok || value == nil {
@@ -1130,6 +1359,39 @@ func toRuntimeContents(in []domain.RuntimeContent) []domain.RuntimeContent {
 		return []domain.RuntimeContent{}
 	}
 	return in
+}
+
+func runtimeHistoryToAgentInputMessages(history []domain.RuntimeMessage) []domain.AgentInputMessage {
+	if len(history) == 0 {
+		return []domain.AgentInputMessage{}
+	}
+	out := make([]domain.AgentInputMessage, 0, len(history))
+	for _, msg := range history {
+		role := strings.TrimSpace(msg.Role)
+		if role == "" {
+			continue
+		}
+		msgType := strings.TrimSpace(msg.Type)
+		if msgType == "" {
+			msgType = "message"
+		}
+		item := domain.AgentInputMessage{
+			Role:    role,
+			Type:    msgType,
+			Content: append([]domain.RuntimeContent{}, msg.Content...),
+		}
+		if msg.Metadata != nil {
+			data, err := json.Marshal(msg.Metadata)
+			if err == nil {
+				var meta map[string]interface{}
+				if err := json.Unmarshal(data, &meta); err == nil {
+					item.Metadata = meta
+				}
+			}
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func splitReplyChunks(text string, chunkSize int) []string {
@@ -1414,10 +1676,57 @@ type toolCall struct {
 	Input map[string]interface{}
 }
 
+type recoverableProviderToolCall struct {
+	ID           string
+	Name         string
+	RawArguments string
+	Input        map[string]interface{}
+	Feedback     string
+}
+
 type toolError struct {
 	Code    string
 	Message string
 	Err     error
+}
+
+func recoverInvalidProviderToolCall(err error, step int) (recoverableProviderToolCall, bool) {
+	invalid, ok := runner.InvalidToolCallFromError(err)
+	if !ok {
+		return recoverableProviderToolCall{}, false
+	}
+
+	callID := strings.TrimSpace(invalid.CallID)
+	if callID == "" {
+		callID = fmt.Sprintf("call_invalid_%d", step)
+	}
+	callName := strings.TrimSpace(invalid.Name)
+	if callName == "" {
+		callName = "unknown_tool"
+	}
+	rawArguments := strings.TrimSpace(invalid.ArgumentsRaw)
+	if rawArguments == "" {
+		rawArguments = "{}"
+	}
+	parseErr := "invalid json arguments"
+	if invalid.Err != nil {
+		parseErr = strings.TrimSpace(invalid.Err.Error())
+	}
+	parseErr = compactFeedbackField(parseErr, 160)
+	input := map[string]interface{}{
+		"raw_arguments": rawArguments,
+	}
+	if parseErr != "" {
+		input["parse_error"] = parseErr
+	}
+
+	return recoverableProviderToolCall{
+		ID:           callID,
+		Name:         callName,
+		RawArguments: rawArguments,
+		Input:        input,
+		Feedback:     formatProviderToolArgumentsErrorFeedback(callName, rawArguments, parseErr),
+	}, true
 }
 
 func (e *channelError) Error() string {
@@ -1927,7 +2236,7 @@ func (s *Server) executeCronJob(id string) error {
 		finalErr = &msg
 	}
 
-	return s.store.Write(func(st *repo.State) error {
+	if err := s.store.Write(func(st *repo.State) error {
 		if _, ok := st.CronJobs[id]; !ok {
 			return nil
 		}
@@ -1936,7 +2245,11 @@ func (s *Server) executeCronJob(id string) error {
 		state.LastError = finalErr
 		st.CronStates[id] = state
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+
+	return execErr
 }
 
 func (s *Server) executeCronTask(ctx context.Context, job domain.CronJobSpec) error {
@@ -1949,19 +2262,71 @@ func (s *Server) executeCronTask(ctx context.Context, job domain.CronJobSpec) er
 	default:
 	}
 	if job.TaskType == "text" && strings.TrimSpace(job.Text) != "" {
-		channelName := resolveCronDispatchChannel(job)
-		channelPlugin, channelCfg, _, err := s.resolveChannel(channelName)
+		channelName := strings.ToLower(resolveCronDispatchChannel(job))
+		if channelName == qqChannelName {
+			return errors.New("cron dispatch channel \"qq\" is inbound-only; use channel \"console\" to persist chat history")
+		}
+		channelPlugin, channelCfg, resolvedChannelName, err := s.resolveChannel(channelName)
 		if err != nil {
 			return err
+		}
+		if resolvedChannelName == "console" {
+			return s.executeCronConsoleAgentTask(ctx, job)
 		}
 		if err := channelPlugin.SendText(ctx, job.Dispatch.Target.UserID, job.Dispatch.Target.SessionID, job.Text, channelCfg); err != nil {
 			return &channelError{
 				Code:    "channel_dispatch_failed",
-				Message: fmt.Sprintf("failed to dispatch cron job to channel %q", channelName),
+				Message: fmt.Sprintf("failed to dispatch cron job to channel %q", resolvedChannelName),
 				Err:     err,
 			}
 		}
 	}
+	return nil
+}
+
+func (s *Server) executeCronConsoleAgentTask(ctx context.Context, job domain.CronJobSpec) error {
+	sessionID := strings.TrimSpace(job.Dispatch.Target.SessionID)
+	userID := strings.TrimSpace(job.Dispatch.Target.UserID)
+	if sessionID == "" || userID == "" {
+		return errors.New("cron dispatch target requires non-empty session_id and user_id")
+	}
+
+	text := strings.TrimSpace(job.Text)
+	if text == "" {
+		return nil
+	}
+
+	agentReq := domain.AgentProcessRequest{
+		Input: []domain.AgentInputMessage{
+			{
+				Role: "user",
+				Type: "message",
+				Content: []domain.RuntimeContent{
+					{Type: "text", Text: text},
+				},
+			},
+		},
+		SessionID: sessionID,
+		UserID:    userID,
+		Channel:   "console",
+		Stream:    false,
+		BizParams: buildCronBizParams(job),
+	}
+
+	body, err := json.Marshal(agentReq)
+	if err != nil {
+		return fmt.Errorf("cron console agent request marshal failed: %w", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/agent/process", nil).WithContext(ctx)
+	s.processAgentWithBody(recorder, request, body)
+
+	status := recorder.Result().StatusCode
+	if status >= http.StatusBadRequest {
+		return fmt.Errorf("cron console agent execution failed: status=%d body=%s", status, strings.TrimSpace(recorder.Body.String()))
+	}
+
 	return nil
 }
 
@@ -1971,6 +2336,24 @@ func resolveCronDispatchChannel(job domain.CronJobSpec) string {
 		return "console"
 	}
 	return channelName
+}
+
+func buildCronBizParams(job domain.CronJobSpec) map[string]interface{} {
+	jobID := strings.TrimSpace(job.ID)
+	jobName := strings.TrimSpace(job.Name)
+	if jobID == "" && jobName == "" {
+		return nil
+	}
+	cronPayload := map[string]interface{}{}
+	if jobID != "" {
+		cronPayload["job_id"] = jobID
+	}
+	if jobName != "" {
+		cronPayload["job_name"] = jobName
+	}
+	return map[string]interface{}{
+		"cron": cronPayload,
+	}
 }
 
 func alignCronStateForMutation(job domain.CronJobSpec, state domain.CronJobState, now time.Time) domain.CronJobState {
@@ -2752,6 +3135,7 @@ const (
 	workspaceFileModels    = "config/models.json"
 	workspaceFileActiveLLM = "config/active-llm.json"
 	workspaceFileAITools   = aiToolsGuideRelativePath
+	workspaceDocsAIDir     = "docs/AI"
 )
 
 type workspaceFileEntry struct {
@@ -2791,10 +3175,8 @@ func (s *Server) listWorkspaceFiles(w http.ResponseWriter, _ *http.Request) {
 	s.store.Read(func(st *repo.State) {
 		out.Files = collectWorkspaceFiles(st)
 	})
-	if aiToolsFile, ok := workspaceAIToolsFileEntry(); ok {
-		out.Files = append(out.Files, aiToolsFile)
-		sort.Slice(out.Files, func(i, j int) bool { return out.Files[i].Path < out.Files[j].Path })
-	}
+	out.Files = mergeWorkspaceFileEntries(out.Files, collectWorkspaceTextFileEntries()...)
+	sort.Slice(out.Files, func(i, j int) bool { return out.Files[i].Path < out.Files[j].Path })
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -2804,8 +3186,8 @@ func (s *Server) getWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid_path", "invalid workspace file path", nil)
 		return
 	}
-	if isAIToolsWorkspaceFilePath(filePath) {
-		resolvedPath, content, err := readAIToolsGuideRawWithPath()
+	if isWorkspaceTextFilePath(filePath) {
+		resolvedPath, content, err := readWorkspaceTextFileRawForPath(filePath)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				writeErr(w, http.StatusNotFound, "not_found", "workspace file not found", nil)
@@ -2840,7 +3222,7 @@ func (s *Server) putWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid_path", "invalid workspace file path", nil)
 		return
 	}
-	if isAIToolsWorkspaceFilePath(filePath) {
+	if isWorkspaceTextFilePath(filePath) {
 		var body struct {
 			Content string `json:"content"`
 		}
@@ -2852,7 +3234,7 @@ func (s *Server) putWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "invalid_ai_tools_guide", "content is required", nil)
 			return
 		}
-		if err := writeAIToolsGuideRawForPath(filePath, body.Content); err != nil {
+		if err := writeWorkspaceTextFileRawForPath(filePath, body.Content); err != nil {
 			writeErr(w, http.StatusInternalServerError, "file_error", err.Error(), nil)
 			return
 		}
@@ -3124,6 +3506,77 @@ func collectWorkspaceFiles(st *repo.State) []workspaceFileEntry {
 	return files
 }
 
+func collectWorkspaceTextFileEntries() []workspaceFileEntry {
+	files := collectWorkspaceDocsAIFileEntries()
+	if aiToolsFile, ok := workspaceAIToolsFileEntry(); ok {
+		files = append(files, aiToolsFile)
+	}
+	return mergeWorkspaceFileEntries(nil, files...)
+}
+
+func collectWorkspaceDocsAIFileEntries() []workspaceFileEntry {
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return nil
+	}
+	docsDir := filepath.Join(repoRoot, filepath.FromSlash(workspaceDocsAIDir))
+	info, err := os.Stat(docsDir)
+	if err != nil || !info.IsDir() {
+		return nil
+	}
+
+	files := []workspaceFileEntry{}
+	_ = filepath.WalkDir(docsDir, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(repoRoot, path)
+		if err != nil {
+			return nil
+		}
+		relPath := filepath.ToSlash(rel)
+		if !isWorkspaceDocsAIFilePath(relPath) {
+			return nil
+		}
+		files = append(files, workspaceFileEntry{
+			Path: relPath,
+			Kind: "config",
+			Size: int(info.Size()),
+		})
+		return nil
+	})
+	return files
+}
+
+func mergeWorkspaceFileEntries(base []workspaceFileEntry, extra ...workspaceFileEntry) []workspaceFileEntry {
+	out := make([]workspaceFileEntry, 0, len(base)+len(extra))
+	indexByPath := map[string]int{}
+	entries := append(append([]workspaceFileEntry{}, base...), extra...)
+	for _, item := range entries {
+		path := strings.TrimSpace(item.Path)
+		if path == "" {
+			continue
+		}
+		item.Path = path
+		if idx, ok := indexByPath[path]; ok {
+			if out[idx].Size <= 0 && item.Size > 0 {
+				out[idx] = item
+			}
+			continue
+		}
+		indexByPath[path] = len(out)
+		out = append(out, item)
+	}
+	return out
+}
+
 func readWorkspaceFileData(st *repo.State, filePath string) (interface{}, bool) {
 	switch filePath {
 	case workspaceFileEnvs:
@@ -3196,7 +3649,7 @@ func isWorkspaceConfigFile(filePath string) bool {
 		filePath == workspaceFileChannels ||
 		filePath == workspaceFileModels ||
 		filePath == workspaceFileActiveLLM ||
-		isAIToolsWorkspaceFilePath(filePath)
+		isWorkspaceTextFilePath(filePath)
 }
 
 func normalizeWorkspaceEnvs(in map[string]string) (map[string]string, error) {
@@ -3525,6 +3978,43 @@ func mapToolError(err error) (status int, code string, message string) {
 	return http.StatusInternalServerError, "tool_error", "tool execution failed"
 }
 
+func compactFeedbackField(raw string, maxLen int) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	compact := strings.Join(strings.Fields(trimmed), " ")
+	if maxLen <= 0 {
+		return compact
+	}
+	runes := []rune(compact)
+	if len(runes) <= maxLen {
+		return compact
+	}
+	return string(runes[:maxLen]) + "...(truncated)"
+}
+
+func formatProviderToolArgumentsErrorFeedback(toolName, rawArguments, parseErr string) string {
+	name := strings.TrimSpace(toolName)
+	if name == "" {
+		name = "unknown_tool"
+	}
+	detail := compactFeedbackField(parseErr, 160)
+	if detail == "" {
+		detail = "invalid json arguments"
+	}
+	raw := compactFeedbackField(rawArguments, 320)
+	if raw == "" {
+		raw = "{}"
+	}
+	return fmt.Sprintf(
+		"tool_error code=invalid_tool_input message=provider tool call arguments for %s are invalid detail=%s raw_arguments=%s",
+		name,
+		detail,
+		raw,
+	)
+}
+
 func formatToolErrorFeedback(err error) string {
 	if err == nil {
 		return "tool_error code=tool_error message=tool execution failed"
@@ -3814,6 +4304,51 @@ func writeAIToolsGuideRawForPath(relativePath, content string) error {
 	return os.WriteFile(guidePath, []byte(content), 0o644)
 }
 
+func readWorkspaceTextFileRawForPath(relativePath string) (string, string, error) {
+	normalized, ok := normalizeAIToolsGuideRelativePath(relativePath)
+	if !ok {
+		return "", "", errors.New("invalid workspace text file path")
+	}
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return "", "", err
+	}
+	target := filepath.Join(repoRoot, filepath.FromSlash(normalized))
+	content, err := os.ReadFile(target)
+	if err != nil {
+		return "", "", err
+	}
+	return normalized, string(content), nil
+}
+
+func writeWorkspaceTextFileRawForPath(relativePath, content string) error {
+	normalized, ok := normalizeAIToolsGuideRelativePath(relativePath)
+	if !ok {
+		return errors.New("invalid workspace text file path")
+	}
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return err
+	}
+	target := filepath.Join(repoRoot, filepath.FromSlash(normalized))
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(target, []byte(content), 0o644)
+}
+
+func isWorkspaceTextFilePath(filePath string) bool {
+	return isWorkspaceDocsAIFilePath(filePath) || isAIToolsWorkspaceFilePath(filePath)
+}
+
+func isWorkspaceDocsAIFilePath(filePath string) bool {
+	path := strings.TrimSpace(filePath)
+	if path == "" {
+		return false
+	}
+	return strings.HasPrefix(path, workspaceDocsAIDir+"/")
+}
+
 func isAIToolsWorkspaceFilePath(filePath string) bool {
 	path := strings.TrimSpace(filePath)
 	if path == "" {
@@ -3888,7 +4423,12 @@ func aiToolsGuidePathCandidates() ([]string, error) {
 	} else if hasEnv {
 		candidates = append(candidates, envPath)
 	}
-	candidates = append(candidates, aiToolsGuideRelativePath, aiToolsGuideLegacyRelativePath)
+	candidates = append(
+		candidates,
+		aiToolsGuideRelativePath,
+		aiToolsGuideLegacyRelativePath,
+		aiToolsGuideLegacyV0RelativePath,
+	)
 
 	seen := map[string]struct{}{}
 	unique := make([]string, 0, len(candidates))

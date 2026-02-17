@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"copaw-next/apps/gateway/internal/domain"
-	"copaw-next/apps/gateway/internal/provider"
+	"nextai/apps/gateway/internal/domain"
+	"nextai/apps/gateway/internal/provider"
 )
 
 func TestGenerateReplyDemo(t *testing.T) {
@@ -230,6 +230,50 @@ func TestGenerateTurnOpenAIToolCalls(t *testing.T) {
 	rawTools, ok := requestBody["tools"].([]interface{})
 	if !ok || len(rawTools) != 1 {
 		t.Fatalf("expected one tool definition in request, got=%#v", requestBody["tools"])
+	}
+}
+
+func TestGenerateTurnOpenAIInvalidToolArgumentsReturnsRecoverableError(t *testing.T) {
+	t.Parallel()
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/chat/completions" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"","tool_calls":[{"id":"call_view","type":"function","function":{"name":"view","arguments":"{\"items\":[{\"path\":\"/tmp/a\",\"start\":1,\"end\":3}]"}}]}}]}`))
+	}))
+	defer mock.Close()
+
+	r := NewWithHTTPClient(mock.Client())
+	_, err := r.GenerateTurn(context.Background(), domain.AgentProcessRequest{
+		Input: []domain.AgentInputMessage{{
+			Role:    "user",
+			Type:    "message",
+			Content: []domain.RuntimeContent{{Type: "text", Text: "view /tmp/a"}},
+		}},
+	}, GenerateConfig{
+		ProviderID: ProviderOpenAI,
+		Model:      "gpt-4o-mini",
+		APIKey:     "sk-test",
+		BaseURL:    mock.URL,
+	}, []ToolDefinition{{Name: "view"}})
+	assertRunnerCode(t, err, ErrorCodeProviderInvalidReply)
+
+	invalid, ok := InvalidToolCallFromError(err)
+	if !ok {
+		t.Fatalf("expected InvalidToolCallError, got=%T (%v)", err, err)
+	}
+	if invalid.Name != "view" {
+		t.Fatalf("unexpected tool name: %q", invalid.Name)
+	}
+	if invalid.CallID != "call_view" {
+		t.Fatalf("unexpected call id: %q", invalid.CallID)
+	}
+	if !strings.Contains(invalid.ArgumentsRaw, `{"items":[{"path":"/tmp/a","start":1,"end":3}]`) {
+		t.Fatalf("unexpected raw arguments: %q", invalid.ArgumentsRaw)
+	}
+	if invalid.Err == nil || !strings.Contains(invalid.Err.Error(), "unexpected end of JSON input") {
+		t.Fatalf("unexpected parse error: %#v", invalid.Err)
 	}
 }
 

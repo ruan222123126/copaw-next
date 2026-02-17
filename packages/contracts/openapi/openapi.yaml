@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: CoPaw Next API
+  title: NextAI API
   version: 0.1.0
 servers:
   - url: http://127.0.0.1:8088
@@ -95,6 +95,17 @@ paths:
       responses:
         '200':
           description: accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /channels/qq/state:
+    get:
+      summary: Get QQ inbound websocket runtime state
+      responses:
+        '200':
+          description: ok
           content:
             application/json:
               schema:
@@ -508,7 +519,10 @@ components:
           items: { $ref: '#/components/schemas/AgentInputMessage' }
         session_id: { type: string, minLength: 1 }
         user_id: { type: string, minLength: 1 }
-        channel: { type: string, minLength: 1 }
+        channel:
+          type: string
+          minLength: 1
+          description: Optional. If omitted, Gateway auto-detects channel by request source (web/cli -> console, qq inbound -> qq).
         stream: { type: boolean }
         biz_params:
           type: object
@@ -517,7 +531,7 @@ components:
           properties:
             tool:
               $ref: '#/components/schemas/AgentToolCall'
-      required: [input, session_id, user_id, channel, stream]
+      required: [input, session_id, user_id, stream]
     AgentToolCall:
       type: object
       properties:

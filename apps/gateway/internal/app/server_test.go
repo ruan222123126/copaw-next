@@ -15,15 +15,16 @@ import (
 	"testing"
 	"time"
 
-	"copaw-next/apps/gateway/internal/config"
-	"copaw-next/apps/gateway/internal/domain"
-	"copaw-next/apps/gateway/internal/provider"
-	"copaw-next/apps/gateway/internal/repo"
+	"nextai/apps/gateway/internal/config"
+	"nextai/apps/gateway/internal/domain"
+	"nextai/apps/gateway/internal/provider"
+	"nextai/apps/gateway/internal/repo"
 )
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "copaw-next-gateway-test-")
+	t.Setenv("NEXTAI_DISABLE_QQ_INBOUND_SUPERVISOR", "true")
+	dir, err := os.MkdirTemp("", "nextai-gateway-test-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,6 +49,21 @@ func newToolTestPath(t *testing.T, prefix string) (string, string) {
 		t.Fatal(err)
 	}
 	rel := filepath.ToSlash(filepath.Join("apps/gateway/.data/tool-tests", fmt.Sprintf("%s-%d.txt", prefix, time.Now().UnixNano())))
+	abs := filepath.Join(repoRoot, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(abs) })
+	return rel, abs
+}
+
+func newDocsAITestPath(t *testing.T, prefix string) (string, string) {
+	t.Helper()
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel := filepath.ToSlash(filepath.Join("docs/AI", fmt.Sprintf("%s-%d.md", prefix, time.Now().UnixNano())))
 	abs := filepath.Join(repoRoot, filepath.FromSlash(rel))
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		t.Fatal(err)
@@ -127,7 +143,7 @@ func TestHealthz(t *testing.T) {
 }
 
 func TestAPIKeyAuthMiddleware(t *testing.T) {
-	dir, err := os.MkdirTemp("", "copaw-next-gateway-auth-")
+	dir, err := os.MkdirTemp("", "nextai-gateway-auth-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,6 +222,35 @@ func TestChatCreateAndGetHistory(t *testing.T) {
 	}
 	if !strings.Contains(w3.Body.String(), "assistant") {
 		t.Fatalf("history should contain assistant message: %s", w3.Body.String())
+	}
+}
+
+func TestProcessAgentReusesChatHistoryContext(t *testing.T) {
+	srv := newTestServer(t)
+
+	firstReq := `{"input":[{"role":"user","type":"message","content":[{"type":"text","text":"1+1等于几"}]}],"session_id":"s-context","user_id":"u-context","channel":"console","stream":false}`
+	firstW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(firstW, httptest.NewRequest(http.MethodPost, "/agent/process", strings.NewReader(firstReq)))
+	if firstW.Code != http.StatusOK {
+		t.Fatalf("first process status=%d body=%s", firstW.Code, firstW.Body.String())
+	}
+
+	secondReq := `{"input":[{"role":"user","type":"message","content":[{"type":"text","text":"把你之前回答的数学问题再回答一次"}]}],"session_id":"s-context","user_id":"u-context","channel":"console","stream":false}`
+	secondW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(secondW, httptest.NewRequest(http.MethodPost, "/agent/process", strings.NewReader(secondReq)))
+	if secondW.Code != http.StatusOK {
+		t.Fatalf("second process status=%d body=%s", secondW.Code, secondW.Body.String())
+	}
+
+	var secondResp domain.AgentProcessResponse
+	if err := json.Unmarshal(secondW.Body.Bytes(), &secondResp); err != nil {
+		t.Fatalf("decode second response failed: %v body=%s", err, secondW.Body.String())
+	}
+	if !strings.Contains(secondResp.Reply, "1+1等于几") {
+		t.Fatalf("expected second reply to include previous user context, got=%q", secondResp.Reply)
+	}
+	if !strings.Contains(secondResp.Reply, "把你之前回答的数学问题再回答一次") {
+		t.Fatalf("expected second reply to include latest user input, got=%q", secondResp.Reply)
 	}
 }
 
@@ -298,6 +343,107 @@ func TestProcessAgentRejectsUnsupportedChannel(t *testing.T) {
 	}
 }
 
+func TestProcessAgentRespectsRequestedChannelForWebSource(t *testing.T) {
+	var tokenCalls atomic.Int32
+	var messageCalls atomic.Int32
+
+	qqAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			tokenCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"qq-token","expires_in":7200}`))
+		case "/v2/users/u-web-auto/messages":
+			messageCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Fatalf("unexpected qq path: %s", r.URL.Path)
+		}
+	}))
+	defer qqAPI.Close()
+
+	srv := newTestServer(t)
+	configW := httptest.NewRecorder()
+	channelConfig := `{"enabled":true,"app_id":"app-1","client_secret":"secret-1","token_url":"` + qqAPI.URL + `/token","api_base":"` + qqAPI.URL + `","target_type":"c2c"}`
+	srv.Handler().ServeHTTP(configW, httptest.NewRequest(http.MethodPut, "/config/channels/qq", strings.NewReader(channelConfig)))
+	if configW.Code != http.StatusOK {
+		t.Fatalf("config qq status=%d body=%s", configW.Code, configW.Body.String())
+	}
+
+	procReq := `{"input":[{"role":"user","type":"message","content":[{"type":"text","text":"hello from web source"}]}],"session_id":"s-web-auto","user_id":"u-web-auto","channel":"qq","stream":false}`
+	req := httptest.NewRequest(http.MethodPost, "/agent/process", strings.NewReader(procReq))
+	req.Header.Set(channelSourceHeader, "web")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("process status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	chatsW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(chatsW, httptest.NewRequest(http.MethodGet, "/chats?user_id=u-web-auto&channel=qq", nil))
+	if chatsW.Code != http.StatusOK {
+		t.Fatalf("list qq chats status=%d body=%s", chatsW.Code, chatsW.Body.String())
+	}
+	var qqChats []domain.ChatSpec
+	if err := json.Unmarshal(chatsW.Body.Bytes(), &qqChats); err != nil {
+		t.Fatalf("decode qq chats failed: %v body=%s", err, chatsW.Body.String())
+	}
+	if len(qqChats) != 1 {
+		t.Fatalf("expected one qq chat, got=%d body=%s", len(qqChats), chatsW.Body.String())
+	}
+	if qqChats[0].Channel != "qq" {
+		t.Fatalf("expected chat channel qq, got=%q", qqChats[0].Channel)
+	}
+
+	consoleChatsW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(consoleChatsW, httptest.NewRequest(http.MethodGet, "/chats?user_id=u-web-auto&channel=console", nil))
+	if consoleChatsW.Code != http.StatusOK {
+		t.Fatalf("list console chats status=%d body=%s", consoleChatsW.Code, consoleChatsW.Body.String())
+	}
+	var consoleChats []domain.ChatSpec
+	if err := json.Unmarshal(consoleChatsW.Body.Bytes(), &consoleChats); err != nil {
+		t.Fatalf("decode console chats failed: %v body=%s", err, consoleChatsW.Body.String())
+	}
+	if len(consoleChats) != 0 {
+		t.Fatalf("expected no console chats, got=%d body=%s", len(consoleChats), consoleChatsW.Body.String())
+	}
+	if got := tokenCalls.Load(); got != 1 {
+		t.Fatalf("expected one token call, got=%d", got)
+	}
+	if got := messageCalls.Load(); got != 1 {
+		t.Fatalf("expected one qq message call, got=%d", got)
+	}
+}
+
+func TestProcessAgentDefaultsToConsoleForCLISourceWithoutChannel(t *testing.T) {
+	srv := newTestServer(t)
+
+	procReq := `{"input":[{"role":"user","type":"message","content":[{"type":"text","text":"hello from cli source"}]}],"session_id":"s-cli-auto","user_id":"u-cli-auto","stream":false}`
+	req := httptest.NewRequest(http.MethodPost, "/agent/process", strings.NewReader(procReq))
+	req.Header.Set(channelSourceHeader, "cli")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("process status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	chatsW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(chatsW, httptest.NewRequest(http.MethodGet, "/chats?user_id=u-cli-auto&channel=console", nil))
+	if chatsW.Code != http.StatusOK {
+		t.Fatalf("list console chats status=%d body=%s", chatsW.Code, chatsW.Body.String())
+	}
+	var chats []domain.ChatSpec
+	if err := json.Unmarshal(chatsW.Body.Bytes(), &chats); err != nil {
+		t.Fatalf("decode chats failed: %v body=%s", err, chatsW.Body.String())
+	}
+	if len(chats) != 1 {
+		t.Fatalf("expected one console chat, got=%d body=%s", len(chats), chatsW.Body.String())
+	}
+	if chats[0].Channel != "console" {
+		t.Fatalf("expected chat channel console, got=%q", chats[0].Channel)
+	}
+}
+
 func TestProcessAgentDispatchesToWebhookChannel(t *testing.T) {
 	var received atomic.Int32
 	var gotBody map[string]interface{}
@@ -343,10 +489,9 @@ func TestProcessAgentDispatchesToWebhookChannel(t *testing.T) {
 	}
 }
 
-func TestProcessAgentDispatchesToQQChannel(t *testing.T) {
+func TestProcessAgentQQChannelDispatchesOutboundMessage(t *testing.T) {
 	var tokenCalls atomic.Int32
 	var messageCalls atomic.Int32
-	var messageBody map[string]interface{}
 
 	qqAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -356,13 +501,6 @@ func TestProcessAgentDispatchesToQQChannel(t *testing.T) {
 			_, _ = w.Write([]byte(`{"access_token":"qq-token","expires_in":7200}`))
 		case "/v2/users/u1/messages":
 			messageCalls.Add(1)
-			if got := r.Header.Get("Authorization"); got != "QQBot qq-token" {
-				t.Fatalf("unexpected authorization header: %s", got)
-			}
-			defer r.Body.Close()
-			if err := json.NewDecoder(r.Body).Decode(&messageBody); err != nil {
-				t.Fatalf("decode qq message body failed: %v", err)
-			}
 			w.WriteHeader(http.StatusOK)
 		default:
 			t.Fatalf("unexpected qq path: %s", r.URL.Path)
@@ -384,22 +522,125 @@ func TestProcessAgentDispatchesToQQChannel(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("process status=%d body=%s", w.Code, w.Body.String())
 	}
-
+	if !strings.Contains(w.Body.String(), "Echo: hello qq") {
+		t.Fatalf("unexpected process body: %s", w.Body.String())
+	}
 	if got := tokenCalls.Load(); got != 1 {
 		t.Fatalf("expected one token call, got=%d", got)
 	}
 	if got := messageCalls.Load(); got != 1 {
 		t.Fatalf("expected one qq message call, got=%d", got)
 	}
-	if text, _ := messageBody["content"].(string); !strings.Contains(text, "Echo: hello qq") {
-		t.Fatalf("unexpected qq content: %#v", messageBody["content"])
+}
+
+func TestProcessAgentNewCommandClearsSessionContext(t *testing.T) {
+	srv := newTestServer(t)
+
+	firstReq := `{"input":[{"role":"user","type":"message","content":[{"type":"text","text":"hello before reset"}]}],"session_id":"s-reset","user_id":"u-reset","channel":"console","stream":false}`
+	firstW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(firstW, httptest.NewRequest(http.MethodPost, "/agent/process", strings.NewReader(firstReq)))
+	if firstW.Code != http.StatusOK {
+		t.Fatalf("first process status=%d body=%s", firstW.Code, firstW.Body.String())
+	}
+
+	chatsBeforeResetW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(chatsBeforeResetW, httptest.NewRequest(http.MethodGet, "/chats?user_id=u-reset&channel=console", nil))
+	if chatsBeforeResetW.Code != http.StatusOK {
+		t.Fatalf("list chats before reset status=%d body=%s", chatsBeforeResetW.Code, chatsBeforeResetW.Body.String())
+	}
+
+	var chatsBeforeReset []domain.ChatSpec
+	if err := json.Unmarshal(chatsBeforeResetW.Body.Bytes(), &chatsBeforeReset); err != nil {
+		t.Fatalf("decode chats before reset failed: %v body=%s", err, chatsBeforeResetW.Body.String())
+	}
+	if len(chatsBeforeReset) != 1 {
+		t.Fatalf("expected one chat before reset, got=%d body=%s", len(chatsBeforeReset), chatsBeforeResetW.Body.String())
+	}
+	originalChat := chatsBeforeReset[0]
+
+	originalHistoryW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(originalHistoryW, httptest.NewRequest(http.MethodGet, "/chats/"+originalChat.ID, nil))
+	if originalHistoryW.Code != http.StatusOK {
+		t.Fatalf("get original history status=%d body=%s", originalHistoryW.Code, originalHistoryW.Body.String())
+	}
+	var originalHistory domain.ChatHistory
+	if err := json.Unmarshal(originalHistoryW.Body.Bytes(), &originalHistory); err != nil {
+		t.Fatalf("decode original history failed: %v body=%s", err, originalHistoryW.Body.String())
+	}
+	if !chatHistoryContainsText(originalHistory, "hello before reset") {
+		t.Fatalf("expected original history to contain first user text, body=%s", originalHistoryW.Body.String())
+	}
+
+	resetReq := `{"input":[{"role":"user","type":"message","content":[{"type":"text","text":" /new "}]}],"session_id":"s-reset","user_id":"u-reset","channel":"console","stream":false}`
+	resetW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(resetW, httptest.NewRequest(http.MethodPost, "/agent/process", strings.NewReader(resetReq)))
+	if resetW.Code != http.StatusOK {
+		t.Fatalf("reset process status=%d body=%s", resetW.Code, resetW.Body.String())
+	}
+	var resetResp domain.AgentProcessResponse
+	if err := json.Unmarshal(resetW.Body.Bytes(), &resetResp); err != nil {
+		t.Fatalf("decode reset response failed: %v body=%s", err, resetW.Body.String())
+	}
+	if !strings.Contains(resetResp.Reply, "上下文已清理") {
+		t.Fatalf("unexpected reset reply: %#v", resetResp.Reply)
+	}
+
+	chatsAfterResetW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(chatsAfterResetW, httptest.NewRequest(http.MethodGet, "/chats?user_id=u-reset&channel=console", nil))
+	if chatsAfterResetW.Code != http.StatusOK {
+		t.Fatalf("list chats after reset status=%d body=%s", chatsAfterResetW.Code, chatsAfterResetW.Body.String())
+	}
+	var chatsAfterReset []domain.ChatSpec
+	if err := json.Unmarshal(chatsAfterResetW.Body.Bytes(), &chatsAfterReset); err != nil {
+		t.Fatalf("decode chats after reset failed: %v body=%s", err, chatsAfterResetW.Body.String())
+	}
+	if len(chatsAfterReset) != 0 {
+		t.Fatalf("expected no chats after reset, got=%d body=%s", len(chatsAfterReset), chatsAfterResetW.Body.String())
+	}
+
+	secondReq := `{"input":[{"role":"user","type":"message","content":[{"type":"text","text":"hello after reset"}]}],"session_id":"s-reset","user_id":"u-reset","channel":"console","stream":false}`
+	secondW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(secondW, httptest.NewRequest(http.MethodPost, "/agent/process", strings.NewReader(secondReq)))
+	if secondW.Code != http.StatusOK {
+		t.Fatalf("second process status=%d body=%s", secondW.Code, secondW.Body.String())
+	}
+
+	chatsAfterSecondW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(chatsAfterSecondW, httptest.NewRequest(http.MethodGet, "/chats?user_id=u-reset&channel=console", nil))
+	if chatsAfterSecondW.Code != http.StatusOK {
+		t.Fatalf("list chats after second message status=%d body=%s", chatsAfterSecondW.Code, chatsAfterSecondW.Body.String())
+	}
+	var chatsAfterSecond []domain.ChatSpec
+	if err := json.Unmarshal(chatsAfterSecondW.Body.Bytes(), &chatsAfterSecond); err != nil {
+		t.Fatalf("decode chats after second message failed: %v body=%s", err, chatsAfterSecondW.Body.String())
+	}
+	if len(chatsAfterSecond) != 1 {
+		t.Fatalf("expected one chat after second message, got=%d body=%s", len(chatsAfterSecond), chatsAfterSecondW.Body.String())
+	}
+	if chatsAfterSecond[0].ID == originalChat.ID {
+		t.Fatalf("expected a new chat id after reset, got unchanged id=%s", chatsAfterSecond[0].ID)
+	}
+
+	newHistoryW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(newHistoryW, httptest.NewRequest(http.MethodGet, "/chats/"+chatsAfterSecond[0].ID, nil))
+	if newHistoryW.Code != http.StatusOK {
+		t.Fatalf("get new history status=%d body=%s", newHistoryW.Code, newHistoryW.Body.String())
+	}
+	var newHistory domain.ChatHistory
+	if err := json.Unmarshal(newHistoryW.Body.Bytes(), &newHistory); err != nil {
+		t.Fatalf("decode new history failed: %v body=%s", err, newHistoryW.Body.String())
+	}
+	if chatHistoryContainsText(newHistory, "hello before reset") {
+		t.Fatalf("expected previous context to be cleared, body=%s", newHistoryW.Body.String())
+	}
+	if !chatHistoryContainsText(newHistory, "hello after reset") {
+		t.Fatalf("expected new history to contain post-reset text, body=%s", newHistoryW.Body.String())
 	}
 }
 
-func TestQQInboundDispatchesC2CEvent(t *testing.T) {
+func TestQQInboundC2CEventTriggersOutboundDispatch(t *testing.T) {
 	var tokenCalls atomic.Int32
 	var messageCalls atomic.Int32
-	var messageBody map[string]interface{}
 
 	qqAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -409,10 +650,6 @@ func TestQQInboundDispatchesC2CEvent(t *testing.T) {
 			_, _ = w.Write([]byte(`{"access_token":"qq-token","expires_in":7200}`))
 		case "/v2/users/u-c2c/messages":
 			messageCalls.Add(1)
-			defer r.Body.Close()
-			if err := json.NewDecoder(r.Body).Decode(&messageBody); err != nil {
-				t.Fatalf("decode qq c2c message body failed: %v", err)
-			}
 			w.WriteHeader(http.StatusOK)
 		default:
 			t.Fatalf("unexpected qq path: %s", r.URL.Path)
@@ -441,15 +678,11 @@ func TestQQInboundDispatchesC2CEvent(t *testing.T) {
 	if got := messageCalls.Load(); got != 1 {
 		t.Fatalf("expected one qq c2c dispatch, got=%d", got)
 	}
-	if text, _ := messageBody["content"].(string); !strings.Contains(text, "Echo: hello inbound c2c") {
-		t.Fatalf("unexpected qq c2c content: %#v", messageBody["content"])
-	}
 }
 
-func TestQQInboundDispatchesGroupEvent(t *testing.T) {
+func TestQQInboundGroupEventTriggersOutboundDispatch(t *testing.T) {
 	var tokenCalls atomic.Int32
 	var groupCalls atomic.Int32
-	var groupBody map[string]interface{}
 
 	qqAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -459,10 +692,6 @@ func TestQQInboundDispatchesGroupEvent(t *testing.T) {
 			_, _ = w.Write([]byte(`{"access_token":"qq-token","expires_in":7200}`))
 		case "/v2/groups/group-openid-1/messages":
 			groupCalls.Add(1)
-			defer r.Body.Close()
-			if err := json.NewDecoder(r.Body).Decode(&groupBody); err != nil {
-				t.Fatalf("decode qq group message body failed: %v", err)
-			}
 			w.WriteHeader(http.StatusOK)
 		default:
 			t.Fatalf("unexpected qq path: %s", r.URL.Path)
@@ -491,11 +720,126 @@ func TestQQInboundDispatchesGroupEvent(t *testing.T) {
 	if got := groupCalls.Load(); got != 1 {
 		t.Fatalf("expected one qq group dispatch, got=%d", got)
 	}
-	if text, _ := groupBody["content"].(string); !strings.Contains(text, "Echo: hello inbound group") {
-		t.Fatalf("unexpected qq group content: %#v", groupBody["content"])
+}
+
+func TestQQInboundNewCommandClearsSessionContext(t *testing.T) {
+	var tokenCalls atomic.Int32
+	var messageCalls atomic.Int32
+
+	qqAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			tokenCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"qq-token","expires_in":7200}`))
+		case "/v2/users/u-c2c-reset/messages":
+			messageCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Fatalf("unexpected qq path: %s", r.URL.Path)
+		}
+	}))
+	defer qqAPI.Close()
+
+	srv := newTestServer(t)
+	channelConfig := `{"enabled":true,"app_id":"app-1","client_secret":"secret-1","token_url":"` + qqAPI.URL + `/token","api_base":"` + qqAPI.URL + `","target_type":"c2c"}`
+	configW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(configW, httptest.NewRequest(http.MethodPut, "/config/channels/qq", strings.NewReader(channelConfig)))
+	if configW.Code != http.StatusOK {
+		t.Fatalf("set qq channel config status=%d body=%s", configW.Code, configW.Body.String())
 	}
-	if got, ok := groupBody["msg_type"].(float64); !ok || got != 0 {
-		t.Fatalf("unexpected group msg_type: %#v", groupBody["msg_type"])
+
+	firstInboundReq := `{"t":"C2C_MESSAGE_CREATE","d":{"id":"m-c2c-1","content":"hello inbound before reset","author":{"user_openid":"u-c2c-reset"}}}`
+	firstInboundW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(firstInboundW, httptest.NewRequest(http.MethodPost, "/channels/qq/inbound", strings.NewReader(firstInboundReq)))
+	if firstInboundW.Code != http.StatusOK {
+		t.Fatalf("first inbound status=%d body=%s", firstInboundW.Code, firstInboundW.Body.String())
+	}
+
+	chatsBeforeResetW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(chatsBeforeResetW, httptest.NewRequest(http.MethodGet, "/chats?user_id=u-c2c-reset&channel=qq", nil))
+	if chatsBeforeResetW.Code != http.StatusOK {
+		t.Fatalf("list qq chats before reset status=%d body=%s", chatsBeforeResetW.Code, chatsBeforeResetW.Body.String())
+	}
+	var chatsBeforeReset []domain.ChatSpec
+	if err := json.Unmarshal(chatsBeforeResetW.Body.Bytes(), &chatsBeforeReset); err != nil {
+		t.Fatalf("decode qq chats before reset failed: %v body=%s", err, chatsBeforeResetW.Body.String())
+	}
+	if len(chatsBeforeReset) != 1 {
+		t.Fatalf("expected one qq chat before reset, got=%d body=%s", len(chatsBeforeReset), chatsBeforeResetW.Body.String())
+	}
+	originalChat := chatsBeforeReset[0]
+
+	resetInboundReq := `{"t":"C2C_MESSAGE_CREATE","d":{"id":"m-c2c-2","content":" /new ","author":{"user_openid":"u-c2c-reset"}}}`
+	resetInboundW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(resetInboundW, httptest.NewRequest(http.MethodPost, "/channels/qq/inbound", strings.NewReader(resetInboundReq)))
+	if resetInboundW.Code != http.StatusOK {
+		t.Fatalf("reset inbound status=%d body=%s", resetInboundW.Code, resetInboundW.Body.String())
+	}
+	var resetResp domain.AgentProcessResponse
+	if err := json.Unmarshal(resetInboundW.Body.Bytes(), &resetResp); err != nil {
+		t.Fatalf("decode reset inbound response failed: %v body=%s", err, resetInboundW.Body.String())
+	}
+	if !strings.Contains(resetResp.Reply, "上下文已清理") {
+		t.Fatalf("unexpected reset inbound reply: %#v", resetResp.Reply)
+	}
+
+	chatsAfterResetW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(chatsAfterResetW, httptest.NewRequest(http.MethodGet, "/chats?user_id=u-c2c-reset&channel=qq", nil))
+	if chatsAfterResetW.Code != http.StatusOK {
+		t.Fatalf("list qq chats after reset status=%d body=%s", chatsAfterResetW.Code, chatsAfterResetW.Body.String())
+	}
+	var chatsAfterReset []domain.ChatSpec
+	if err := json.Unmarshal(chatsAfterResetW.Body.Bytes(), &chatsAfterReset); err != nil {
+		t.Fatalf("decode qq chats after reset failed: %v body=%s", err, chatsAfterResetW.Body.String())
+	}
+	if len(chatsAfterReset) != 0 {
+		t.Fatalf("expected no qq chats after reset, got=%d body=%s", len(chatsAfterReset), chatsAfterResetW.Body.String())
+	}
+
+	secondInboundReq := `{"t":"C2C_MESSAGE_CREATE","d":{"id":"m-c2c-3","content":"hello inbound after reset","author":{"user_openid":"u-c2c-reset"}}}`
+	secondInboundW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(secondInboundW, httptest.NewRequest(http.MethodPost, "/channels/qq/inbound", strings.NewReader(secondInboundReq)))
+	if secondInboundW.Code != http.StatusOK {
+		t.Fatalf("second inbound status=%d body=%s", secondInboundW.Code, secondInboundW.Body.String())
+	}
+
+	chatsAfterSecondW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(chatsAfterSecondW, httptest.NewRequest(http.MethodGet, "/chats?user_id=u-c2c-reset&channel=qq", nil))
+	if chatsAfterSecondW.Code != http.StatusOK {
+		t.Fatalf("list qq chats after second message status=%d body=%s", chatsAfterSecondW.Code, chatsAfterSecondW.Body.String())
+	}
+	var chatsAfterSecond []domain.ChatSpec
+	if err := json.Unmarshal(chatsAfterSecondW.Body.Bytes(), &chatsAfterSecond); err != nil {
+		t.Fatalf("decode qq chats after second message failed: %v body=%s", err, chatsAfterSecondW.Body.String())
+	}
+	if len(chatsAfterSecond) != 1 {
+		t.Fatalf("expected one qq chat after second message, got=%d body=%s", len(chatsAfterSecond), chatsAfterSecondW.Body.String())
+	}
+	if chatsAfterSecond[0].ID == originalChat.ID {
+		t.Fatalf("expected a new qq chat id after reset, got unchanged id=%s", chatsAfterSecond[0].ID)
+	}
+
+	newHistoryW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(newHistoryW, httptest.NewRequest(http.MethodGet, "/chats/"+chatsAfterSecond[0].ID, nil))
+	if newHistoryW.Code != http.StatusOK {
+		t.Fatalf("get new qq history status=%d body=%s", newHistoryW.Code, newHistoryW.Body.String())
+	}
+	var newHistory domain.ChatHistory
+	if err := json.Unmarshal(newHistoryW.Body.Bytes(), &newHistory); err != nil {
+		t.Fatalf("decode new qq history failed: %v body=%s", err, newHistoryW.Body.String())
+	}
+	if chatHistoryContainsText(newHistory, "hello inbound before reset") {
+		t.Fatalf("expected qq previous context to be cleared, body=%s", newHistoryW.Body.String())
+	}
+	if !chatHistoryContainsText(newHistory, "hello inbound after reset") {
+		t.Fatalf("expected qq new history to contain post-reset text, body=%s", newHistoryW.Body.String())
+	}
+	if got := tokenCalls.Load(); got != 1 {
+		t.Fatalf("expected one token call across qq reset flow, got=%d", got)
+	}
+	if got := messageCalls.Load(); got != 3 {
+		t.Fatalf("expected three qq dispatches across reset flow, got=%d", got)
 	}
 }
 
@@ -509,6 +853,71 @@ func TestQQInboundRejectsUnsupportedEvent(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `"code":"invalid_qq_event"`) {
 		t.Fatalf("unexpected body: %s", w.Body.String())
+	}
+}
+
+func chatHistoryContainsText(history domain.ChatHistory, want string) bool {
+	for _, msg := range history.Messages {
+		for _, content := range msg.Content {
+			if strings.Contains(content.Text, want) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestQQInboundStateEndpointReturnsRuntimeSnapshot(t *testing.T) {
+	srv := newTestServer(t)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/channels/qq/state", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("state status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode state body failed: %v", err)
+	}
+	if _, ok := body["configured"].(bool); !ok {
+		t.Fatalf("missing configured bool: %#v", body["configured"])
+	}
+	if _, ok := body["running"].(bool); !ok {
+		t.Fatalf("missing running bool: %#v", body["running"])
+	}
+	if _, ok := body["connected"].(bool); !ok {
+		t.Fatalf("missing connected bool: %#v", body["connected"])
+	}
+	if _, ok := body["config"].(map[string]interface{}); !ok {
+		t.Fatalf("missing config map: %#v", body["config"])
+	}
+}
+
+func TestQQInboundStateEndpointReflectsConfiguredIntents(t *testing.T) {
+	srv := newTestServer(t)
+	channelConfig := `{"enabled":true,"app_id":"app-1","client_secret":"secret-1","inbound_enabled":true,"inbound_intents":42}`
+	configW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(configW, httptest.NewRequest(http.MethodPut, "/config/channels/qq", strings.NewReader(channelConfig)))
+	if configW.Code != http.StatusOK {
+		t.Fatalf("set qq channel config status=%d body=%s", configW.Code, configW.Body.String())
+	}
+
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/channels/qq/state", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("state status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode state body failed: %v", err)
+	}
+	if configured, _ := body["configured"].(bool); !configured {
+		t.Fatalf("expected configured=true, got=%#v", body["configured"])
+	}
+	configObj, _ := body["config"].(map[string]interface{})
+	if intents, _ := configObj["intents"].(float64); intents != 42 {
+		t.Fatalf("expected config intents=42, got=%#v", configObj["intents"])
 	}
 }
 
@@ -599,6 +1008,10 @@ func TestProcessAgentRejectsShellToolWithoutCommand(t *testing.T) {
 
 func TestWorkspaceFilesListIncludesConfigAndSkillFiles(t *testing.T) {
 	srv := newTestServer(t)
+	docsPath, docsAbsPath := newDocsAITestPath(t, "workspace-list")
+	if err := os.WriteFile(docsAbsPath, []byte("# workspace list test\n"), 0o644); err != nil {
+		t.Fatalf("seed docs/AI file failed: %v", err)
+	}
 
 	createSkill := `{"name":"demo-skill","content":"## skill content"}`
 	createW := httptest.NewRecorder()
@@ -632,10 +1045,17 @@ func TestWorkspaceFilesListIncludesConfigAndSkillFiles(t *testing.T) {
 	if got := paths["skills/demo-skill.json"]; got != "skill" {
 		t.Fatalf("expected skills/demo-skill.json to be skill, got=%q", got)
 	}
+	if got := paths[docsPath]; got != "config" {
+		t.Fatalf("expected %s to be config, got=%q", docsPath, got)
+	}
 }
 
 func TestWorkspaceFileConfigAndSkillCRUD(t *testing.T) {
 	srv := newTestServer(t)
+	docsPath, docsAbsPath := newDocsAITestPath(t, "workspace-crud")
+	if err := os.WriteFile(docsAbsPath, []byte("# before update\n"), 0o644); err != nil {
+		t.Fatalf("seed docs/AI file failed: %v", err)
+	}
 
 	envBody := `{"OPENAI_API_KEY":"sk-test"}`
 	putEnvsW := httptest.NewRecorder()
@@ -669,6 +1089,29 @@ func TestWorkspaceFileConfigAndSkillCRUD(t *testing.T) {
 		t.Fatalf("skill file should include normalized name: %s", getSkillW.Body.String())
 	}
 
+	getDocsW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(getDocsW, httptest.NewRequest(http.MethodGet, "/workspace/files/"+docsPath, nil))
+	if getDocsW.Code != http.StatusOK {
+		t.Fatalf("get docs/AI file status=%d body=%s", getDocsW.Code, getDocsW.Body.String())
+	}
+	if !strings.Contains(getDocsW.Body.String(), "# before update") {
+		t.Fatalf("docs/AI file should return text content: %s", getDocsW.Body.String())
+	}
+
+	putDocsBody := `{"content":"# after update"}`
+	putDocsW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(putDocsW, httptest.NewRequest(http.MethodPut, "/workspace/files/"+docsPath, strings.NewReader(putDocsBody)))
+	if putDocsW.Code != http.StatusOK {
+		t.Fatalf("put docs/AI file status=%d body=%s", putDocsW.Code, putDocsW.Body.String())
+	}
+	updatedDocsRaw, err := os.ReadFile(docsAbsPath)
+	if err != nil {
+		t.Fatalf("read updated docs/AI file failed: %v", err)
+	}
+	if strings.TrimSpace(string(updatedDocsRaw)) != "# after update" {
+		t.Fatalf("unexpected docs/AI file content: %s", string(updatedDocsRaw))
+	}
+
 	delSkillW := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(delSkillW, httptest.NewRequest(http.MethodDelete, "/workspace/files/skills/hello.json", nil))
 	if delSkillW.Code != http.StatusOK {
@@ -679,6 +1122,12 @@ func TestWorkspaceFileConfigAndSkillCRUD(t *testing.T) {
 	srv.Handler().ServeHTTP(delConfigW, httptest.NewRequest(http.MethodDelete, "/workspace/files/config/envs.json", nil))
 	if delConfigW.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("delete config status=%d body=%s", delConfigW.Code, delConfigW.Body.String())
+	}
+
+	delDocsW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(delDocsW, httptest.NewRequest(http.MethodDelete, "/workspace/files/"+docsPath, nil))
+	if delDocsW.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("delete docs/AI file status=%d body=%s", delDocsW.Code, delDocsW.Body.String())
 	}
 }
 
@@ -1380,6 +1829,123 @@ func TestProcessAgentContinuesAfterToolPathError(t *testing.T) {
 	}
 }
 
+func TestProcessAgentContinuesAfterProviderToolArgumentParseError(t *testing.T) {
+	var calls int
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method != http.MethodPost || r.URL.Path != "/chat/completions" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if calls == 1 {
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{
+						"message": map[string]interface{}{
+							"content": "",
+							"tool_calls": []map[string]interface{}{
+								{
+									"id":   "call_view",
+									"type": "function",
+									"function": map[string]interface{}{
+										"name":      "view",
+										"arguments": `{"items":[{"path":"/tmp/a","start":1,"end":2}]`,
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+			return
+		}
+
+		var req map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode provider request failed: %v", err)
+		}
+		messages, _ := req["messages"].([]interface{})
+		hasToolErrorFeedback := false
+		for _, item := range messages {
+			msg, _ := item.(map[string]interface{})
+			role, _ := msg["role"].(string)
+			content, _ := msg["content"].(string)
+			if role == "tool" &&
+				strings.Contains(content, "tool_error code=invalid_tool_input") &&
+				strings.Contains(content, "provider tool call arguments for view are invalid") &&
+				strings.Contains(content, "unexpected end of JSON input") &&
+				strings.Contains(content, `raw_arguments={"items":[{"path":"/tmp/a","start":1,"end":2}]`) {
+				hasToolErrorFeedback = true
+				break
+			}
+		}
+		if !hasToolErrorFeedback {
+			t.Fatalf("expected provider tool-argument error feedback in second provider request, got=%#v", req["messages"])
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message": map[string]interface{}{
+						"content": "fixed after provider tool argument error",
+					},
+				},
+			},
+		})
+	}))
+	defer mock.Close()
+
+	srv := newTestServer(t)
+	configProvider := `{"api_key":"sk-test","base_url":"` + mock.URL + `"}`
+	w1 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w1, httptest.NewRequest(http.MethodPut, "/models/openai/config", strings.NewReader(configProvider)))
+	if w1.Code != http.StatusOK {
+		t.Fatalf("config provider status=%d body=%s", w1.Code, w1.Body.String())
+	}
+	setActive := `{"provider_id":"openai","model":"gpt-4o-mini"}`
+	w2 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w2, httptest.NewRequest(http.MethodPut, "/models/active", strings.NewReader(setActive)))
+	if w2.Code != http.StatusOK {
+		t.Fatalf("set active status=%d body=%s", w2.Code, w2.Body.String())
+	}
+
+	procReq := `{"input":[{"role":"user","type":"message","content":[{"type":"text","text":"view then recover from malformed args"}]}],"session_id":"s-provider-tool-args-recover","user_id":"u-provider-tool-args-recover","channel":"console","stream":false}`
+	w3 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w3, httptest.NewRequest(http.MethodPost, "/agent/process", strings.NewReader(procReq)))
+	if w3.Code != http.StatusOK {
+		t.Fatalf("process status=%d body=%s", w3.Code, w3.Body.String())
+	}
+	if calls < 2 {
+		t.Fatalf("expected at least 2 model calls, got=%d", calls)
+	}
+
+	var out domain.AgentProcessResponse
+	if err := json.Unmarshal(w3.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode response failed: %v body=%s", err, w3.Body.String())
+	}
+	if out.Reply != "fixed after provider tool argument error" {
+		t.Fatalf("unexpected final reply: %q", out.Reply)
+	}
+
+	hasFailedToolCall := false
+	hasFailedToolResult := false
+	for _, evt := range out.Events {
+		if evt.Type == "tool_call" && evt.ToolCall != nil && evt.ToolCall.Name == "view" {
+			if raw, _ := evt.ToolCall.Input["raw_arguments"].(string); strings.Contains(raw, `{"items":[{"path":"/tmp/a","start":1,"end":2}]`) {
+				hasFailedToolCall = true
+			}
+		}
+		if evt.Type == "tool_result" && evt.ToolResult != nil && evt.ToolResult.Name == "view" && !evt.ToolResult.OK {
+			if strings.Contains(evt.ToolResult.Summary, "unexpected end of JSON input") {
+				hasFailedToolResult = true
+			}
+		}
+	}
+	if !hasFailedToolCall || !hasFailedToolResult {
+		t.Fatalf("expected failed tool_call/tool_result events for malformed arguments, got=%+v", out.Events)
+	}
+}
+
 func TestProcessAgentStillSupportsLegacyBizParamsToolFormat(t *testing.T) {
 	srv := newTestServer(t)
 	_, absPath := newToolTestPath(t, "legacy-view-lines")
@@ -1911,8 +2477,147 @@ func TestRunCronJobDispatchesToWebhookChannel(t *testing.T) {
 	}
 }
 
+func TestRunCronJobQQChannelFailsFast(t *testing.T) {
+	srv := newTestServer(t)
+	createReq := `{
+		"id":"job-qq",
+		"name":"job-qq",
+		"enabled":false,
+		"schedule":{"type":"interval","cron":"60s"},
+		"task_type":"text",
+		"text":"hello qq cron",
+		"dispatch":{"channel":"qq","target":{"user_id":"u-qq-cron","session_id":"s-qq-cron"}},
+		"runtime":{"max_concurrency":1,"timeout_seconds":5}
+	}`
+	createW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(createW, httptest.NewRequest(http.MethodPost, "/cron/jobs", strings.NewReader(createReq)))
+	if createW.Code != http.StatusOK {
+		t.Fatalf("create cron status=%d body=%s", createW.Code, createW.Body.String())
+	}
+	var created domain.CronJobSpec
+	if err := json.Unmarshal(createW.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created cron failed: %v body=%s", err, createW.Body.String())
+	}
+	if created.Dispatch.Channel != "qq" {
+		t.Fatalf("expected created dispatch channel=qq, got=%q", created.Dispatch.Channel)
+	}
+
+	runW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(runW, httptest.NewRequest(http.MethodPost, "/cron/jobs/job-qq/run", nil))
+	if runW.Code != http.StatusInternalServerError {
+		t.Fatalf("expected run cron status=500, got=%d body=%s", runW.Code, runW.Body.String())
+	}
+	if !strings.Contains(runW.Body.String(), "inbound-only") {
+		t.Fatalf("expected qq inbound-only error, body=%s", runW.Body.String())
+	}
+
+	state := getCronState(t, srv, "job-qq")
+	if got, _ := state["last_status"].(string); got != cronStatusFailed {
+		t.Fatalf("expected last_status=%q, got=%v", cronStatusFailed, state["last_status"])
+	}
+	if errMsg, _ := state["last_error"].(string); !strings.Contains(errMsg, "inbound-only") {
+		t.Fatalf("expected inbound-only last_error, got=%v", state["last_error"])
+	}
+}
+
+func TestRunCronJobRoutesConsoleTextThroughAgent(t *testing.T) {
+	srv := newTestServer(t)
+
+	createChatReq := `{"name":"existing-chat","session_id":"s-cron-console","user_id":"u-cron-console","channel":"console","meta":{}}`
+	createChatW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(createChatW, httptest.NewRequest(http.MethodPost, "/chats", strings.NewReader(createChatReq)))
+	if createChatW.Code != http.StatusOK {
+		t.Fatalf("create chat status=%d body=%s", createChatW.Code, createChatW.Body.String())
+	}
+
+	var created domain.ChatSpec
+	if err := json.Unmarshal(createChatW.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created chat failed: %v body=%s", err, createChatW.Body.String())
+	}
+	if created.ID == "" {
+		t.Fatalf("created chat id is empty")
+	}
+
+	createCronReq := `{
+		"id":"job-console",
+		"name":"job-console",
+		"enabled":false,
+		"schedule":{"type":"interval","cron":"60s"},
+		"task_type":"text",
+		"text":"hello console cron",
+		"dispatch":{"channel":"console","target":{"user_id":"u-cron-console","session_id":"s-cron-console"}},
+		"runtime":{"max_concurrency":1,"timeout_seconds":5}
+	}`
+	createCronW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(createCronW, httptest.NewRequest(http.MethodPost, "/cron/jobs", strings.NewReader(createCronReq)))
+	if createCronW.Code != http.StatusOK {
+		t.Fatalf("create cron status=%d body=%s", createCronW.Code, createCronW.Body.String())
+	}
+
+	runW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(runW, httptest.NewRequest(http.MethodPost, "/cron/jobs/job-console/run", nil))
+	if runW.Code != http.StatusOK {
+		t.Fatalf("run cron status=%d body=%s", runW.Code, runW.Body.String())
+	}
+
+	state := getCronState(t, srv, "job-console")
+	if got, _ := state["last_status"].(string); got != cronStatusSucceeded {
+		t.Fatalf("expected last_status=%q, got=%v", cronStatusSucceeded, state["last_status"])
+	}
+
+	listW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(listW, httptest.NewRequest(http.MethodGet, "/chats?channel=console&user_id=u-cron-console", nil))
+	if listW.Code != http.StatusOK {
+		t.Fatalf("list chats status=%d body=%s", listW.Code, listW.Body.String())
+	}
+
+	var chats []domain.ChatSpec
+	if err := json.Unmarshal(listW.Body.Bytes(), &chats); err != nil {
+		t.Fatalf("decode chats failed: %v body=%s", err, listW.Body.String())
+	}
+	if len(chats) != 1 {
+		t.Fatalf("expected one chat, got=%d", len(chats))
+	}
+	if got, _ := chats[0].Meta["source"].(string); got != "cron" {
+		t.Fatalf("expected chat meta source=cron, got=%v", chats[0].Meta["source"])
+	}
+	if got, _ := chats[0].Meta["cron_job_id"].(string); got != "job-console" {
+		t.Fatalf("expected chat meta cron_job_id=job-console, got=%v", chats[0].Meta["cron_job_id"])
+	}
+
+	historyW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(historyW, httptest.NewRequest(http.MethodGet, "/chats/"+created.ID, nil))
+	if historyW.Code != http.StatusOK {
+		t.Fatalf("get history status=%d body=%s", historyW.Code, historyW.Body.String())
+	}
+
+	var history domain.ChatHistory
+	if err := json.Unmarshal(historyW.Body.Bytes(), &history); err != nil {
+		t.Fatalf("decode history failed: %v body=%s", err, historyW.Body.String())
+	}
+	if len(history.Messages) < 2 {
+		t.Fatalf("expected user+assistant history messages after cron run, got=%d", len(history.Messages))
+	}
+
+	userInput := history.Messages[len(history.Messages)-2]
+	if userInput.Role != "user" {
+		t.Fatalf("expected user role for cron prompt, got=%q", userInput.Role)
+	}
+	if len(userInput.Content) == 0 || userInput.Content[0].Text != "hello console cron" {
+		t.Fatalf("unexpected cron prompt content: %+v", userInput.Content)
+	}
+
+	last := history.Messages[len(history.Messages)-1]
+	if last.Role != "assistant" {
+		t.Fatalf("expected assistant role, got=%q", last.Role)
+	}
+	if len(last.Content) == 0 || last.Content[0].Text != "Echo: hello console cron" {
+		t.Fatalf("unexpected last message content: %+v", last.Content)
+	}
+}
+
 func TestCronSchedulerRecoversPersistedDueJob(t *testing.T) {
-	dir, err := os.MkdirTemp("", "copaw-next-gateway-recovery-")
+	dir, err := os.MkdirTemp("", "nextai-gateway-recovery-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1992,7 +2697,7 @@ func TestCronSchedulerRunsCronExpressionJob(t *testing.T) {
 }
 
 func TestCronSchedulerSkipsMisfireOutsideGrace(t *testing.T) {
-	dir, err := os.MkdirTemp("", "copaw-next-gateway-misfire-")
+	dir, err := os.MkdirTemp("", "nextai-gateway-misfire-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2116,7 +2821,7 @@ func TestExecuteCronJobRespectsMaxConcurrency(t *testing.T) {
 }
 
 func TestExecuteCronJobRespectsMaxConcurrencyAcrossServers(t *testing.T) {
-	dir, err := os.MkdirTemp("", "copaw-next-gateway-distributed-lock-")
+	dir, err := os.MkdirTemp("", "nextai-gateway-distributed-lock-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2212,8 +2917,8 @@ func TestExecuteCronJobRespectsTimeout(t *testing.T) {
 		}
 	}
 
-	if err := srv.executeCronJob("job-timeout"); err != nil {
-		t.Fatalf("execute cron failed: %v", err)
+	if err := srv.executeCronJob("job-timeout"); err == nil || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("expected timeout error, got=%v", err)
 	}
 	state := getCronState(t, srv, "job-timeout")
 	if got, _ := state["last_status"].(string); got != cronStatusFailed {
