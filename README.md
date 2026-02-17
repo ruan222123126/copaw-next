@@ -75,14 +75,26 @@ python3 -m http.server 5173 --bind 127.0.0.1 --directory dist
 
 ### 方式一：下载总包（推荐）
 
-1. 下载并解压（示例版本：`v0.1.0-rc.3`）
+1. 下载并解压（示例版本：`v0.1.0-rc.4`）
+
+Linux:
 
 ```bash
-export NEXTAI_VERSION=v0.1.0-rc.3
+export NEXTAI_VERSION=v0.1.0-rc.4
 mkdir -p /opt/nextai && cd /opt/nextai
 curl -fL -o nextai-release-linux-amd64.tar.gz \
   "https://github.com/ruan222123126/NextAI/releases/download/${NEXTAI_VERSION}/nextai-release-linux-amd64.tar.gz"
 tar -xzf nextai-release-linux-amd64.tar.gz
+```
+
+Windows (PowerShell):
+
+```powershell
+$env:NEXTAI_VERSION = "v0.1.0-rc.4"
+New-Item -ItemType Directory -Force C:\nextai | Out-Null
+Set-Location C:\nextai
+Invoke-WebRequest -Uri "https://github.com/ruan222123126/NextAI/releases/download/$env:NEXTAI_VERSION/nextai-release-windows-amd64.zip" -OutFile "nextai-release-windows-amd64.zip"
+Expand-Archive -Path .\nextai-release-windows-amd64.zip -DestinationPath . -Force
 ```
 
 2. 准备配置（复制模板后直接改值）
@@ -182,16 +194,30 @@ node agent.js "打开 https://example.com，读取标题"
 
 3. 启动 Gateway（会自动加载当前目录 `.env`）
 
+Linux:
+
 ```bash
 cd /opt/nextai
 chmod +x gateway-linux-amd64
 ./gateway-linux-amd64
 ```
 
+Windows (PowerShell):
+
+```powershell
+Set-Location C:\nextai
+.\gateway-windows-amd64.exe
+```
+
 也可以指定自定义配置路径：
 
 ```bash
 NEXTAI_ENV_FILE=/etc/nextai/gateway.env ./gateway-linux-amd64
+```
+
+```powershell
+$env:NEXTAI_ENV_FILE = "C:\nextai\gateway.env"
+.\gateway-windows-amd64.exe
 ```
 
 4. 启动 CLI（需要 Node.js `22+`）
@@ -212,8 +238,11 @@ python3 -m http.server 5173 --bind 0.0.0.0 --directory web
 ### 方式二：按单独产物下载
 
 - `gateway-linux-amd64`：Gateway 可执行文件（Linux amd64）
+- `gateway-windows-amd64.exe`：Gateway 可执行文件（Windows amd64）
 - `cli-dist.tar.gz`：CLI/TUI 构建产物（解压后用 `node index.js ...` 运行）
 - `web-dist.tar.gz`：Web 静态产物（解压后用 Nginx/Caddy/`http.server` 托管）
+- `nextai-release-linux-amd64.tar.gz`：Linux 总包（gateway + cli + web + `.env.example`）
+- `nextai-release-windows-amd64.zip`：Windows 总包（gateway + cli + web + `.env.example`）
 
 这些产物都在 GitHub Release 附件中。
 

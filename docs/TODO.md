@@ -1,6 +1,6 @@
 # NextAI TODO
 
-更新时间：2026-02-17 19:47:01 +0800
+更新时间：2026-02-17 19:55:48 +0800
 
 ## 执行约定（强制）
 - 每位接手 AI 开始前，必须先阅读本文件与 `/home/ruan/.codex/handoff/latest.md`。
@@ -29,6 +29,8 @@
 - [x] `docs/v1-roadmap.md`、`docs/contracts.md`、本地开发文档、部署文档与发布模板已完成。
 
 ## 6. 实操验证（汇总）
+- [x] 2026-02-17 19:55 +0800 Windows 发布包能力落地：更新 `.github/workflows/release.yml`，新增 `gateway-windows-amd64.exe` 与 `nextai-release-windows-amd64.zip` 构建并随 GitHub Release 自动上传。
+- [x] 2026-02-17 19:55 +0800 README 发布指南补齐 Windows：新增 PowerShell 下载/解压、Gateway 启动、`NEXTAI_ENV_FILE` 配置示例，并在单独产物列表中补充 Windows 可执行文件与总包说明。
 - [x] 2026-02-17 19:47 +0800 发版前验证完成：执行 `cd apps/gateway && go test ./...` 与 `cd browser-agent-poc && pnpm run check` 均通过，满足本轮提交与发布前质量门禁。
 - [x] 2026-02-17 19:47 +0800 工作区统一提交准备完成：确认当前改动包含 Gateway `search/browser/.env` 支持、`browser-agent-poc` 目录与 README/Contracts/AI 文档同步，且未纳入本地敏感 `.env`。
 - [x] 2026-02-17 19:47 +0800 计划发布版本：基于已存在 `v0.1.0-rc.3`，本轮按序发布 `v0.1.0-rc.4`（通过 tag 触发 GitHub Release 自动附加总包）。

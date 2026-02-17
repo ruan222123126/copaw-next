@@ -62,6 +62,7 @@ jobs:
         run: |
           mkdir -p dist
           cd apps/gateway && GOOS=linux GOARCH=amd64 go build -o "$GITHUB_WORKSPACE/dist/gateway-linux-amd64" ./cmd/gateway
+          cd "$GITHUB_WORKSPACE/apps/gateway" && GOOS=windows GOARCH=amd64 go build -o "$GITHUB_WORKSPACE/dist/gateway-windows-amd64.exe" ./cmd/gateway
           cd "$GITHUB_WORKSPACE/apps/cli" && pnpm build
           tar -czf "$GITHUB_WORKSPACE/dist/cli-dist.tar.gz" -C "$GITHUB_WORKSPACE/apps/cli/dist" .
           cd "$GITHUB_WORKSPACE/apps/web" && pnpm build
@@ -73,6 +74,23 @@ jobs:
           cp "$GITHUB_WORKSPACE/.env.example" "$GITHUB_WORKSPACE/dist/bundle/.env.example"
           cp "$GITHUB_WORKSPACE/docs/release-template.md" "$GITHUB_WORKSPACE/dist/bundle/release-template.md"
           tar -czf "$GITHUB_WORKSPACE/dist/nextai-release-linux-amd64.tar.gz" -C "$GITHUB_WORKSPACE/dist/bundle" .
+          mkdir -p "$GITHUB_WORKSPACE/dist/bundle-win/cli" "$GITHUB_WORKSPACE/dist/bundle-win/web"
+          cp "$GITHUB_WORKSPACE/dist/gateway-windows-amd64.exe" "$GITHUB_WORKSPACE/dist/bundle-win/"
+          tar -xzf "$GITHUB_WORKSPACE/dist/cli-dist.tar.gz" -C "$GITHUB_WORKSPACE/dist/bundle-win/cli"
+          tar -xzf "$GITHUB_WORKSPACE/dist/web-dist.tar.gz" -C "$GITHUB_WORKSPACE/dist/bundle-win/web"
+          cp "$GITHUB_WORKSPACE/.env.example" "$GITHUB_WORKSPACE/dist/bundle-win/.env.example"
+          cp "$GITHUB_WORKSPACE/docs/release-template.md" "$GITHUB_WORKSPACE/dist/bundle-win/release-template.md"
+          cd "$GITHUB_WORKSPACE/dist/bundle-win"
+          python3 - <<'PY'
+from pathlib import Path
+import zipfile
+root = Path(".")
+with zipfile.ZipFile("../nextai-release-windows-amd64.zip", "w", zipfile.ZIP_DEFLATED) as zf:
+    for path in root.rglob("*"):
+        if path.is_file():
+            zf.write(path, path.relative_to(root))
+PY
+          cd "$GITHUB_WORKSPACE"
           cp "$GITHUB_WORKSPACE/docs/release-template.md" "$GITHUB_WORKSPACE/dist/release-template.md"
 
       - name: Publish GitHub Release
@@ -82,7 +100,9 @@ jobs:
           body_path: docs/release-template.md
           files: |
             dist/gateway-linux-amd64
+            dist/gateway-windows-amd64.exe
             dist/cli-dist.tar.gz
             dist/web-dist.tar.gz
             dist/nextai-release-linux-amd64.tar.gz
+            dist/nextai-release-windows-amd64.zip
             dist/release-template.md
