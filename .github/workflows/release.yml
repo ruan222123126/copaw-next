@@ -82,14 +82,14 @@ jobs:
           cp "$GITHUB_WORKSPACE/docs/release-template.md" "$GITHUB_WORKSPACE/dist/bundle-win/release-template.md"
           cd "$GITHUB_WORKSPACE/dist/bundle-win"
           python3 - <<'PY'
-from pathlib import Path
-import zipfile
-root = Path(".")
-with zipfile.ZipFile("../nextai-release-windows-amd64.zip", "w", zipfile.ZIP_DEFLATED) as zf:
-    for path in root.rglob("*"):
-        if path.is_file():
-            zf.write(path, path.relative_to(root))
-PY
+          from pathlib import Path
+          import zipfile
+          root = Path(".")
+          with zipfile.ZipFile("../nextai-release-windows-amd64.zip", "w", zipfile.ZIP_DEFLATED) as zf:
+              for path in root.rglob("*"):
+                  if path.is_file():
+                      zf.write(path, path.relative_to(root))
+          PY
           cd "$GITHUB_WORKSPACE"
           cp "$GITHUB_WORKSPACE/docs/release-template.md" "$GITHUB_WORKSPACE/dist/release-template.md"
 
