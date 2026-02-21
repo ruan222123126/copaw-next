@@ -260,7 +260,7 @@ Domain & Infra Adapters
 - [x] PR-2 阶段 1：Transport 拆分
 - [x] PR-3 阶段 2A：Agent Service
 - [x] PR-4 阶段 2B：Cron Service
-- [ ] PR-5 阶段 2C：Workspace/Model Service
+- [x] PR-5 阶段 2C：Workspace/Model Service
 - [ ] PR-6 阶段 3：Ports + Adapters
 - [ ] PR-7 阶段 4/5：SystemPrompt 收敛 + 治理
 

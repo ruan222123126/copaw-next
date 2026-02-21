@@ -1,6 +1,6 @@
 # NextAI TODO
 
-更新时间：2026-02-21 15:49:13 +0800
+更新时间：2026-02-21 16:05:55 +0800
 
 ## 执行约定（强制）
 - 每位接手 AI 开始前，必须先阅读本文件与 `/home/ruan/.codex/handoff/latest.md`。
@@ -29,6 +29,8 @@
 - [x] `docs/v1-roadmap.md`、`docs/contracts.md`、本地开发文档、部署文档与发布模板已完成。
 
 ## 6. 实操验证（汇总）
+- [x] 2026-02-21 16:05 +0800 阶段 2C Workspace/Model Service 落地：新增 `apps/gateway/internal/service/model/service.go`、`apps/gateway/internal/service/workspace/service.go` 及对应单测，将 provider/catalog/active-model 与 workspace files/import/export 编排下沉到 service；新增 `apps/gateway/internal/app/server_model_service.go`、`apps/gateway/internal/app/server_workspace_service.go` 完成 wiring，`apps/gateway/internal/app/server_admin.go` 收敛为 HTTP 协议适配与错误映射。
+- [x] 2026-02-21 16:05 +0800 阶段 2C 单测与回归验证：执行 `cd apps/gateway && go test ./internal/service/model ./internal/service/workspace ./internal/app && go test ./...` 全部通过，workspace/models 契约回归语义保持不变。
 - [x] 2026-02-21 15:49 +0800 阶段 2B Cron Service 落地：新增 `apps/gateway/internal/service/cron/service.go` 与 `apps/gateway/internal/service/cron/service_test.go`，将 Cron 的 CRUD、调度 tick、执行与 workflow 计划/状态变更下沉到 service；`apps/gateway/internal/app/server_cron.go` 收敛为 HTTP 协议适配与错误映射，`apps/gateway/internal/app/server.go` 的 `cronSchedulerTick` 改为调用 cron service。
 - [x] 2026-02-21 15:49 +0800 阶段 2B 单测与回归验证：执行 `cd apps/gateway && go test ./internal/service/cron && go test ./internal/app && go test ./...` 全部通过。
 - [x] 2026-02-21 15:24 +0800 阶段 2A Agent Service 落地：新增 `apps/gateway/internal/service/agent/service.go`，将 Agent 的 tool-call/LLM turn 循环编排、结构化事件产出与 runner/tool 错误映射下沉到 service；`apps/gateway/internal/app/server_agent.go` 的 `processAgentWithBody` 改为协议适配 + service 调用 + 持久化/分发收口。

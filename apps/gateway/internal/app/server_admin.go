@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,37 +20,29 @@ import (
 	"nextai/apps/gateway/internal/provider"
 	"nextai/apps/gateway/internal/repo"
 	"nextai/apps/gateway/internal/runner"
+	modelservice "nextai/apps/gateway/internal/service/model"
+	workspaceservice "nextai/apps/gateway/internal/service/workspace"
 )
 
 func (s *Server) listProviders(w http.ResponseWriter, _ *http.Request) {
-	providers, _, _ := s.collectProviderCatalog()
+	providers, err := s.getModelService().ListProviders()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
+		return
+	}
 	writeJSON(w, http.StatusOK, providers)
 }
 
 func (s *Server) getModelCatalog(w http.ResponseWriter, _ *http.Request) {
-	providers, defaults, active := s.collectProviderCatalog()
-	providerTypes := provider.ListProviderTypes()
-	typeOut := make([]domain.ProviderTypeInfo, 0, len(providerTypes))
-	for _, item := range providerTypes {
-		typeOut = append(typeOut, domain.ProviderTypeInfo{
-			ID:          item.ID,
-			DisplayName: item.DisplayName,
-		})
+	out, err := s.getModelService().GetCatalog()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
+		return
 	}
-	writeJSON(w, http.StatusOK, domain.ModelCatalogInfo{
-		Providers:     providers,
-		Defaults:      defaults,
-		ActiveLLM:     active,
-		ProviderTypes: typeOut,
-	})
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) configureProvider(w http.ResponseWriter, r *http.Request) {
-	providerID := normalizeProviderID(chi.URLParam(r, "provider_id"))
-	if providerID == "" {
-		writeErr(w, http.StatusBadRequest, "invalid_provider_id", "provider_id is required", nil)
-		return
-	}
 	var body struct {
 		APIKey       *string            `json:"api_key"`
 		BaseURL      *string            `json:"base_url"`
@@ -63,45 +56,21 @@ func (s *Server) configureProvider(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
 		return
 	}
-	if body.TimeoutMS != nil && *body.TimeoutMS < 0 {
-		writeErr(w, http.StatusBadRequest, "invalid_provider_config", "timeout_ms must be >= 0", nil)
-		return
-	}
-	sanitizedAliases, aliasErr := sanitizeModelAliases(body.ModelAliases)
-	if aliasErr != nil {
-		writeErr(w, http.StatusBadRequest, "invalid_provider_config", aliasErr.Error(), nil)
-		return
-	}
-	var out domain.ProviderInfo
-	if err := s.store.Write(func(st *repo.State) error {
-		setting := getProviderSettingByID(st, providerID)
-		normalizeProviderSetting(&setting)
-		if body.APIKey != nil {
-			setting.APIKey = strings.TrimSpace(*body.APIKey)
+	out, err := s.getModelService().ConfigureProvider(modelservice.ConfigureProviderInput{
+		ProviderID:   chi.URLParam(r, "provider_id"),
+		APIKey:       body.APIKey,
+		BaseURL:      body.BaseURL,
+		DisplayName:  body.DisplayName,
+		Enabled:      body.Enabled,
+		Headers:      body.Headers,
+		TimeoutMS:    body.TimeoutMS,
+		ModelAliases: body.ModelAliases,
+	})
+	if err != nil {
+		if validation := (*modelservice.ValidationError)(nil); errors.As(err, &validation) {
+			writeErr(w, http.StatusBadRequest, validation.Code, validation.Message, nil)
+			return
 		}
-		if body.BaseURL != nil {
-			setting.BaseURL = strings.TrimSpace(*body.BaseURL)
-		}
-		if body.DisplayName != nil {
-			setting.DisplayName = strings.TrimSpace(*body.DisplayName)
-		}
-		if body.Enabled != nil {
-			enabled := *body.Enabled
-			setting.Enabled = &enabled
-		}
-		if body.Headers != nil {
-			setting.Headers = sanitizeStringMap(*body.Headers)
-		}
-		if body.TimeoutMS != nil {
-			setting.TimeoutMS = *body.TimeoutMS
-		}
-		if body.ModelAliases != nil {
-			setting.ModelAliases = sanitizedAliases
-		}
-		st.Providers[providerID] = setting
-		out = buildProviderInfo(providerID, setting)
-		return nil
-	}); err != nil {
 		writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
 		return
 	}
@@ -109,25 +78,12 @@ func (s *Server) configureProvider(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteProvider(w http.ResponseWriter, r *http.Request) {
-	providerID := normalizeProviderID(chi.URLParam(r, "provider_id"))
-	if providerID == "" {
-		writeErr(w, http.StatusBadRequest, "invalid_provider_id", "provider_id is required", nil)
-		return
-	}
-
-	deleted := false
-	if err := s.store.Write(func(st *repo.State) error {
-		for key := range st.Providers {
-			if normalizeProviderID(key) == providerID {
-				delete(st.Providers, key)
-				deleted = true
-			}
+	deleted, err := s.getModelService().DeleteProvider(chi.URLParam(r, "provider_id"))
+	if err != nil {
+		if validation := (*modelservice.ValidationError)(nil); errors.As(err, &validation) {
+			writeErr(w, http.StatusBadRequest, validation.Code, validation.Message, nil)
+			return
 		}
-		if deleted && normalizeProviderID(st.ActiveLLM.ProviderID) == providerID {
-			st.ActiveLLM = domain.ModelSlotConfig{}
-		}
-		return nil
-	}); err != nil {
 		writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
 		return
 	}
@@ -135,10 +91,11 @@ func (s *Server) deleteProvider(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getActiveModels(w http.ResponseWriter, _ *http.Request) {
-	var out domain.ActiveModelsInfo
-	s.store.Read(func(st *repo.State) {
-		out = domain.ActiveModelsInfo{ActiveLLM: st.ActiveLLM}
-	})
+	out, err := s.getModelService().GetActiveModels()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
+		return
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -148,48 +105,27 @@ func (s *Server) setActiveModels(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
 		return
 	}
-	body.ProviderID = normalizeProviderID(body.ProviderID)
-	body.Model = strings.TrimSpace(body.Model)
-	if body.ProviderID == "" || body.Model == "" {
-		writeErr(w, http.StatusBadRequest, "invalid_model_slot", "provider_id and model are required", nil)
-		return
-	}
-	var out domain.ModelSlotConfig
-	if err := s.store.Write(func(st *repo.State) error {
-		setting, ok := findProviderSettingByID(st, body.ProviderID)
-		if !ok {
-			return errors.New("provider_not_found")
+	out, err := s.getModelService().SetActiveModels(body)
+	if err != nil {
+		if validation := (*modelservice.ValidationError)(nil); errors.As(err, &validation) {
+			writeErr(w, http.StatusBadRequest, validation.Code, validation.Message, nil)
+			return
 		}
-		normalizeProviderSetting(&setting)
-		if !providerEnabled(setting) {
-			return errors.New("provider_disabled")
-		}
-		resolvedModel, ok := provider.ResolveModelID(body.ProviderID, body.Model, setting.ModelAliases)
-		if !ok {
-			return errors.New("model_not_found")
-		}
-		out = domain.ModelSlotConfig{
-			ProviderID: body.ProviderID,
-			Model:      resolvedModel,
-		}
-		st.ActiveLLM = out
-		return nil
-	}); err != nil {
-		switch err.Error() {
-		case "provider_not_found":
+		switch {
+		case errors.Is(err, modelservice.ErrProviderNotFound):
 			writeErr(w, http.StatusNotFound, "provider_not_found", "provider not found", nil)
 			return
-		case "provider_disabled":
+		case errors.Is(err, modelservice.ErrProviderDisabled):
 			writeErr(w, http.StatusBadRequest, "provider_disabled", "provider is disabled", nil)
 			return
-		case "model_not_found":
+		case errors.Is(err, modelservice.ErrModelNotFound):
 			writeErr(w, http.StatusBadRequest, "model_not_found", "model not found for provider", nil)
 			return
 		}
 		writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, domain.ActiveModelsInfo{ActiveLLM: out})
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) listEnvs(w http.ResponseWriter, _ *http.Request) {
@@ -481,12 +417,19 @@ type workspaceImportRequest struct {
 }
 
 func (s *Server) listWorkspaceFiles(w http.ResponseWriter, _ *http.Request) {
-	out := workspaceFileListResponse{Files: []workspaceFileEntry{}}
-	s.store.Read(func(st *repo.State) {
-		out.Files = collectWorkspaceFiles(st)
-	})
-	out.Files = mergeWorkspaceFileEntries(out.Files, collectWorkspaceTextFileEntries()...)
-	sort.Slice(out.Files, func(i, j int) bool { return out.Files[i].Path < out.Files[j].Path })
+	result, err := s.getWorkspaceService().ListFiles()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
+		return
+	}
+	out := workspaceFileListResponse{Files: make([]workspaceFileEntry, 0, len(result.Files))}
+	for _, item := range result.Files {
+		out.Files = append(out.Files, workspaceFileEntry{
+			Path: item.Path,
+			Kind: item.Kind,
+			Size: item.Size,
+		})
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -496,31 +439,17 @@ func (s *Server) getWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid_path", "invalid workspace file path", nil)
 		return
 	}
-	if isWorkspaceTextFilePath(filePath) {
-		resolvedPath, content, err := readWorkspaceTextFileRawForPath(filePath)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				writeErr(w, http.StatusNotFound, "not_found", "workspace file not found", nil)
-				return
-			}
-			writeErr(w, http.StatusInternalServerError, "file_error", err.Error(), nil)
-			return
-		}
-		if filePath != resolvedPath {
+	data, err := s.getWorkspaceService().GetFile(filePath)
+	if err != nil {
+		if errors.Is(err, workspaceservice.ErrNotFound) {
 			writeErr(w, http.StatusNotFound, "not_found", "workspace file not found", nil)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"content": content})
-		return
-	}
-
-	var data interface{}
-	found := false
-	s.store.Read(func(st *repo.State) {
-		data, found = readWorkspaceFileData(st, filePath)
-	})
-	if !found {
-		writeErr(w, http.StatusNotFound, "not_found", "workspace file not found", nil)
+		if fileErr := (*workspaceservice.FileError)(nil); errors.As(err, &fileErr) {
+			writeErr(w, http.StatusInternalServerError, "file_error", fileErr.Error(), nil)
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, data)
@@ -532,162 +461,24 @@ func (s *Server) putWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid_path", "invalid workspace file path", nil)
 		return
 	}
-	if isWorkspaceTextFilePath(filePath) {
-		var body struct {
-			Content string `json:"content"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
-			return
-		}
-		if strings.TrimSpace(body.Content) == "" {
-			writeErr(w, http.StatusBadRequest, "invalid_ai_tools_guide", "content is required", nil)
-			return
-		}
-		if err := writeWorkspaceTextFileRawForPath(filePath, body.Content); err != nil {
-			writeErr(w, http.StatusInternalServerError, "file_error", err.Error(), nil)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]bool{"updated": true})
-		return
-	}
-
-	switch filePath {
-	case workspaceFileEnvs:
-		var body map[string]string
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
-			return
-		}
-		envs, err := normalizeWorkspaceEnvs(body)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid_env_key", err.Error(), nil)
-			return
-		}
-		if err := s.store.Write(func(st *repo.State) error {
-			st.Envs = envs
-			return nil
-		}); err != nil {
-			writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]bool{"updated": true})
-		return
-	case workspaceFileChannels:
-		var body domain.ChannelConfigMap
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
-			return
-		}
-		channels, err := normalizeWorkspaceChannels(body, s.channels)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, "channel_not_supported", err.Error(), nil)
-			return
-		}
-		if err := s.store.Write(func(st *repo.State) error {
-			st.Channels = channels
-			return nil
-		}); err != nil {
-			writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]bool{"updated": true})
-		return
-	case workspaceFileModels:
-		var body map[string]repo.ProviderSetting
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
-			return
-		}
-		providers, err := normalizeWorkspaceProviders(body)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid_provider_config", err.Error(), nil)
-			return
-		}
-		if err := s.store.Write(func(st *repo.State) error {
-			st.Providers = providers
-			if st.ActiveLLM.ProviderID != "" {
-				if _, ok := findProviderSettingByID(st, st.ActiveLLM.ProviderID); !ok {
-					st.ActiveLLM = domain.ModelSlotConfig{}
-				}
-			}
-			return nil
-		}); err != nil {
-			writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]bool{"updated": true})
-		return
-	case workspaceFileActiveLLM:
-		var body domain.ModelSlotConfig
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
-			return
-		}
-		body.ProviderID = normalizeProviderID(body.ProviderID)
-		body.Model = strings.TrimSpace(body.Model)
-		if (body.ProviderID == "") != (body.Model == "") {
-			writeErr(w, http.StatusBadRequest, "invalid_model_slot", "provider_id and model must be set together", nil)
-			return
-		}
-		if err := s.store.Write(func(st *repo.State) error {
-			if body.ProviderID == "" {
-				st.ActiveLLM = domain.ModelSlotConfig{}
-				return nil
-			}
-			if _, ok := findProviderSettingByID(st, body.ProviderID); !ok {
-				return errors.New("provider_not_found")
-			}
-			st.ActiveLLM = body
-			return nil
-		}); err != nil {
-			if err.Error() == "provider_not_found" {
-				writeErr(w, http.StatusNotFound, "provider_not_found", "provider not found", nil)
-				return
-			}
-			writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]bool{"updated": true})
-		return
-	}
-
-	name, ok := workspaceSkillNameFromPath(filePath)
-	if !ok {
-		writeErr(w, http.StatusBadRequest, "invalid_path", "invalid workspace file path", nil)
-		return
-	}
-	var body domain.SkillSpec
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
 		return
 	}
-	if body.Name != "" && strings.TrimSpace(body.Name) != name {
-		writeErr(w, http.StatusBadRequest, "invalid_skill", "skill name in body must match file path", nil)
-		return
-	}
-	if strings.TrimSpace(body.Content) == "" {
-		writeErr(w, http.StatusBadRequest, "invalid_skill", "content is required", nil)
-		return
-	}
-
-	source := strings.TrimSpace(body.Source)
-	if source == "" {
-		source = "customized"
-	}
-	spec := domain.SkillSpec{
-		Name:       name,
-		Content:    body.Content,
-		Source:     source,
-		Path:       filepath.Join(s.cfg.DataDir, "skills", name),
-		References: safeMap(body.References),
-		Scripts:    safeMap(body.Scripts),
-		Enabled:    body.Enabled,
-	}
-	if err := s.store.Write(func(st *repo.State) error {
-		st.Skills[name] = spec
-		return nil
-	}); err != nil {
+	if err := s.getWorkspaceService().PutFile(filePath, body); err != nil {
+		if validation := (*workspaceservice.ValidationError)(nil); errors.As(err, &validation) {
+			status := http.StatusBadRequest
+			if validation.Code == "provider_not_found" {
+				status = http.StatusNotFound
+			}
+			writeErr(w, status, validation.Code, validation.Message, nil)
+			return
+		}
+		if fileErr := (*workspaceservice.FileError)(nil); errors.As(err, &fileErr) {
+			writeErr(w, http.StatusInternalServerError, "file_error", fileErr.Error(), nil)
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
 		return
 	}
@@ -700,24 +491,16 @@ func (s *Server) deleteWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid_path", "invalid workspace file path", nil)
 		return
 	}
-	if isWorkspaceConfigFile(filePath) {
-		writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "config files cannot be deleted", nil)
-		return
-	}
-	name, ok := workspaceSkillNameFromPath(filePath)
-	if !ok {
-		writeErr(w, http.StatusBadRequest, "invalid_path", "invalid workspace file path", nil)
-		return
-	}
-
-	deleted := false
-	if err := s.store.Write(func(st *repo.State) error {
-		if _, ok := st.Skills[name]; ok {
-			delete(st.Skills, name)
-			deleted = true
+	deleted, err := s.getWorkspaceService().DeleteFile(filePath)
+	if err != nil {
+		if errors.Is(err, workspaceservice.ErrMethodNotAllowed) {
+			writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "config files cannot be deleted", nil)
+			return
 		}
-		return nil
-	}); err != nil {
+		if validation := (*workspaceservice.ValidationError)(nil); errors.As(err, &validation) {
+			writeErr(w, http.StatusBadRequest, validation.Code, validation.Message, nil)
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
 		return
 	}
@@ -725,73 +508,37 @@ func (s *Server) deleteWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) exportWorkspace(w http.ResponseWriter, _ *http.Request) {
+	result, err := s.getWorkspaceService().Export()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
+		return
+	}
 	out := workspaceExportPayload{
-		Version: "v1",
-		Skills:  map[string]domain.SkillSpec{},
+		Version: result.Version,
+		Skills:  result.Skills,
 		Config: workspaceExportConfig{
-			Envs:     map[string]string{},
-			Channels: domain.ChannelConfigMap{},
+			Envs:     result.Config.Envs,
+			Channels: result.Config.Channels,
 			Models: workspaceExportModels{
-				Providers: map[string]repo.ProviderSetting{},
-				ActiveLLM: domain.ModelSlotConfig{},
+				Providers: result.Config.Models.Providers,
+				ActiveLLM: result.Config.Models.ActiveLLM,
 			},
 		},
 	}
-	s.store.Read(func(st *repo.State) {
-		out.Skills = cloneWorkspaceSkills(st.Skills)
-		out.Config.Envs = cloneWorkspaceEnvs(st.Envs)
-		out.Config.Channels = cloneWorkspaceChannels(st.Channels)
-		out.Config.Models.Providers = cloneWorkspaceProviders(st.Providers)
-		out.Config.Models.ActiveLLM = st.ActiveLLM
-	})
 	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) importWorkspace(w http.ResponseWriter, r *http.Request) {
-	var body workspaceImportRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
 		return
 	}
-	if strings.ToLower(strings.TrimSpace(body.Mode)) != "replace" {
-		writeErr(w, http.StatusBadRequest, "invalid_import_mode", "mode must be replace", nil)
-		return
-	}
-
-	skills, err := normalizeWorkspaceSkills(body.Payload.Skills, s.cfg.DataDir)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid_skill", err.Error(), nil)
-		return
-	}
-	envs, err := normalizeWorkspaceEnvs(body.Payload.Config.Envs)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid_env_key", err.Error(), nil)
-		return
-	}
-	channels, err := normalizeWorkspaceChannels(body.Payload.Config.Channels, s.channels)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "channel_not_supported", err.Error(), nil)
-		return
-	}
-	providers, err := normalizeWorkspaceProviders(body.Payload.Config.Models.Providers)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid_provider_config", err.Error(), nil)
-		return
-	}
-	active, err := normalizeWorkspaceActiveLLM(body.Payload.Config.Models.ActiveLLM, providers)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid_model_slot", err.Error(), nil)
-		return
-	}
-
-	if err := s.store.Write(func(st *repo.State) error {
-		st.Skills = skills
-		st.Envs = envs
-		st.Channels = channels
-		st.Providers = providers
-		st.ActiveLLM = active
-		return nil
-	}); err != nil {
+	if err := s.getWorkspaceService().Import(body); err != nil {
+		if validation := (*workspaceservice.ValidationError)(nil); errors.As(err, &validation) {
+			writeErr(w, http.StatusBadRequest, validation.Code, validation.Message, nil)
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
 		return
 	}
