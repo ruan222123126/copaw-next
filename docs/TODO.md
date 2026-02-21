@@ -1,6 +1,6 @@
 # NextAI TODO
 
-更新时间：2026-02-21 14:55:48 +0800
+更新时间：2026-02-21 15:24:24 +0800
 
 ## 执行约定（强制）
 - 每位接手 AI 开始前，必须先阅读本文件与 `/home/ruan/.codex/handoff/latest.md`。
@@ -29,6 +29,10 @@
 - [x] `docs/v1-roadmap.md`、`docs/contracts.md`、本地开发文档、部署文档与发布模板已完成。
 
 ## 6. 实操验证（汇总）
+- [x] 2026-02-21 15:24 +0800 阶段 2A Agent Service 落地：新增 `apps/gateway/internal/service/agent/service.go`，将 Agent 的 tool-call/LLM turn 循环编排、结构化事件产出与 runner/tool 错误映射下沉到 service；`apps/gateway/internal/app/server_agent.go` 的 `processAgentWithBody` 改为协议适配 + service 调用 + 持久化/分发收口。
+- [x] 2026-02-21 15:24 +0800 阶段 2A 单测与回归验证：新增 `apps/gateway/internal/service/agent/service_test.go` 覆盖 tool 分支、stream runner 分支与 runner 异常映射；执行 `cd apps/gateway && go test ./internal/service/agent && go test ./internal/app && go test ./...` 全部通过。
+- [x] 2026-02-21 15:16 +0800 阶段 1 Transport 拆分落地：新增 `apps/gateway/internal/app/http/router.go`、`apps/gateway/internal/app/http/agent_handlers.go`、`apps/gateway/internal/app/http/cron_handlers.go`、`apps/gateway/internal/app/http/admin_handlers.go`，统一承载路由注册与中间件装配；`apps/gateway/internal/app/server.go` 的 `Handler()` 改为纯 wiring 注入，不再内联路由声明。
+- [x] 2026-02-21 15:16 +0800 阶段 1 回归验证：执行 `cd apps/gateway && go test ./internal/app` 与 `cd apps/gateway && go test ./...` 均通过；`internal/app/http` 为 transport 层拆分，不改 API 契约与错误模型语义。
 - [x] 2026-02-21 14:55 +0800 阶段 0 护栏收口（成功响应结构快照 + 列表字段稳定性）：在 `apps/gateway/internal/app/contract_regression_test.go` 新增 `/chats`、`/cron/jobs`、`/workspace/files`、`/models/catalog` 列表响应结构稳定性回归，固定关键字段集合与核心嵌套结构；同时新增成功响应结构快照回归（创建 Cron、更新 Workspace env、删除 Provider）。
 - [x] 2026-02-21 14:55 +0800 阶段 0 回归再验证：执行 `cd apps/gateway && go test ./internal/app` 与 `cd apps/gateway && go test ./...` 均通过，新增成功响应快照与列表字段稳定性测试与现有用例兼容。
 - [x] 2026-02-21 14:51 +0800 阶段 0 护栏扩展（cron/workspace/models 契约回归集）：在 `apps/gateway/internal/app/contract_regression_test.go` 新增三组统一接口错误契约表驱动测试，覆盖 `cron`（`invalid_json/invalid_cron_task_type/job_id_mismatch/not_found/default_cron_protected`）、`workspace`（`invalid_path/not_found/invalid_json/invalid_model_slot/provider_not_found/method_not_allowed/invalid_import_mode`）、`models`（`invalid_json/invalid_provider_config/invalid_model_slot/provider_not_found/provider_disabled/model_not_found`）状态码与错误模型快照。

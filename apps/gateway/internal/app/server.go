@@ -17,15 +17,15 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 
+	apphttp "nextai/apps/gateway/internal/app/http"
 	"nextai/apps/gateway/internal/channel"
 	"nextai/apps/gateway/internal/config"
 	"nextai/apps/gateway/internal/domain"
-	"nextai/apps/gateway/internal/observability"
 	"nextai/apps/gateway/internal/plugin"
 	"nextai/apps/gateway/internal/repo"
 	"nextai/apps/gateway/internal/runner"
+	agentservice "nextai/apps/gateway/internal/service/agent"
 )
 
 const version = "0.1.0"
@@ -97,11 +97,12 @@ type cronWorkflowPlan struct {
 }
 
 type Server struct {
-	cfg      config.Config
-	store    *repo.Store
-	runner   *runner.Runner
-	channels map[string]plugin.ChannelPlugin
-	tools    map[string]plugin.ToolPlugin
+	cfg          config.Config
+	store        *repo.Store
+	runner       *runner.Runner
+	channels     map[string]plugin.ChannelPlugin
+	tools        map[string]plugin.ToolPlugin
+	agentService *agentservice.Service
 
 	disabledTools map[string]struct{}
 	qqInboundMu   sync.RWMutex
@@ -152,6 +153,7 @@ func NewServer(cfg config.Config) (*Server, error) {
 		}
 		srv.registerToolPlugin(searchTool)
 	}
+	srv.agentService = srv.newAgentService()
 	srv.startCronScheduler()
 	if !parseBool(os.Getenv(disableQQInboundSupervisorEnv)) {
 		srv.startQQInboundSupervisor()
@@ -213,95 +215,71 @@ func (s *Server) toolDisabled(name string) bool {
 }
 
 func (s *Server) Handler() http.Handler {
-	r := chi.NewRouter()
-	r.Use(middleware.RealIP)
-	r.Use(observability.RequestID)
-	r.Use(observability.Logging)
-	r.Use(cors)
-
-	r.Get("/version", s.handleVersion)
-	r.Get("/healthz", s.handleHealthz)
-	r.Get("/runtime-config", s.handleRuntimeConfig)
-
-	r.Group(func(api chi.Router) {
-		api.Use(observability.APIKey(s.cfg.APIKey))
-
-		api.Route("/chats", func(r chi.Router) {
-			r.Get("/", s.listChats)
-			r.Post("/", s.createChat)
-			r.Post("/batch-delete", s.batchDeleteChats)
-			r.Get("/{chat_id}", s.getChat)
-			r.Put("/{chat_id}", s.updateChat)
-			r.Delete("/{chat_id}", s.deleteChat)
-		})
-
-		api.Post("/agent/process", s.processAgent)
-		api.Get("/agent/system-layers", s.getAgentSystemLayers)
-		api.Post("/channels/qq/inbound", s.processQQInbound)
-		api.Get("/channels/qq/state", s.getQQInboundState)
-
-		api.Route("/cron", func(r chi.Router) {
-			r.Get("/jobs", s.listCronJobs)
-			r.Post("/jobs", s.createCronJob)
-			r.Get("/jobs/{job_id}", s.getCronJob)
-			r.Put("/jobs/{job_id}", s.updateCronJob)
-			r.Delete("/jobs/{job_id}", s.deleteCronJob)
-			r.Post("/jobs/{job_id}/pause", s.pauseCronJob)
-			r.Post("/jobs/{job_id}/resume", s.resumeCronJob)
-			r.Post("/jobs/{job_id}/run", s.runCronJob)
-			r.Get("/jobs/{job_id}/state", s.getCronJobState)
-		})
-
-		api.Route("/models", func(r chi.Router) {
-			r.Get("/", s.listProviders)
-			r.Get("/catalog", s.getModelCatalog)
-			r.Put("/{provider_id}/config", s.configureProvider)
-			r.Delete("/{provider_id}", s.deleteProvider)
-			r.Get("/active", s.getActiveModels)
-			r.Put("/active", s.setActiveModels)
-		})
-
-		api.Route("/envs", func(r chi.Router) {
-			r.Get("/", s.listEnvs)
-			r.Put("/", s.putEnvs)
-			r.Delete("/{key}", s.deleteEnv)
-		})
-
-		api.Route("/skills", func(r chi.Router) {
-			r.Get("/", s.listSkills)
-			r.Get("/available", s.listAvailableSkills)
-			r.Post("/batch-disable", s.batchDisableSkills)
-			r.Post("/batch-enable", s.batchEnableSkills)
-			r.Post("/", s.createSkill)
-			r.Post("/{skill_name}/disable", s.disableSkill)
-			r.Post("/{skill_name}/enable", s.enableSkill)
-			r.Delete("/{skill_name}", s.deleteSkill)
-			r.Get("/{skill_name}/files/{source}/{file_path}", s.loadSkillFile)
-		})
-
-		api.Route("/workspace", func(r chi.Router) {
-			r.Get("/files", s.listWorkspaceFiles)
-			r.Get("/files/*", s.getWorkspaceFile)
-			r.Put("/files/*", s.putWorkspaceFile)
-			r.Delete("/files/*", s.deleteWorkspaceFile)
-			r.Get("/export", s.exportWorkspace)
-			r.Post("/import", s.importWorkspace)
-		})
-
-		api.Route("/config", func(r chi.Router) {
-			r.Get("/channels", s.listChannels)
-			r.Get("/channels/types", s.listChannelTypes)
-			r.Put("/channels", s.putChannels)
-			r.Get("/channels/{channel_name}", s.getChannel)
-			r.Put("/channels/{channel_name}", s.putChannel)
-		})
-	})
-
-	if webHandler := webStaticHandler(s.cfg.WebDir); webHandler != nil {
-		r.Get("/*", webHandler)
-	}
-
-	return r
+	return apphttp.NewRouter(
+		s.cfg.APIKey,
+		apphttp.Handlers{
+			Public: apphttp.PublicHandlers{
+				Version:       s.handleVersion,
+				Healthz:       s.handleHealthz,
+				RuntimeConfig: s.handleRuntimeConfig,
+			},
+			Agent: apphttp.AgentHandlers{
+				ListChats:            s.listChats,
+				CreateChat:           s.createChat,
+				BatchDeleteChats:     s.batchDeleteChats,
+				GetChat:              s.getChat,
+				UpdateChat:           s.updateChat,
+				DeleteChat:           s.deleteChat,
+				ProcessAgent:         s.processAgent,
+				GetAgentSystemLayers: s.getAgentSystemLayers,
+				ProcessQQInbound:     s.processQQInbound,
+				GetQQInboundState:    s.getQQInboundState,
+			},
+			Cron: apphttp.CronHandlers{
+				ListCronJobs:  s.listCronJobs,
+				CreateCronJob: s.createCronJob,
+				GetCronJob:    s.getCronJob,
+				UpdateCronJob: s.updateCronJob,
+				DeleteCronJob: s.deleteCronJob,
+				PauseCronJob:  s.pauseCronJob,
+				ResumeCronJob: s.resumeCronJob,
+				RunCronJob:    s.runCronJob,
+				GetCronState:  s.getCronJobState,
+			},
+			Admin: apphttp.AdminHandlers{
+				ListProviders:      s.listProviders,
+				GetModelCatalog:    s.getModelCatalog,
+				ConfigureProvider:  s.configureProvider,
+				DeleteProvider:     s.deleteProvider,
+				GetActiveModels:    s.getActiveModels,
+				SetActiveModels:    s.setActiveModels,
+				ListEnvs:           s.listEnvs,
+				PutEnvs:            s.putEnvs,
+				DeleteEnv:          s.deleteEnv,
+				ListSkills:         s.listSkills,
+				ListAvailableSkill: s.listAvailableSkills,
+				BatchDisableSkills: s.batchDisableSkills,
+				BatchEnableSkills:  s.batchEnableSkills,
+				CreateSkill:        s.createSkill,
+				DisableSkill:       s.disableSkill,
+				EnableSkill:        s.enableSkill,
+				DeleteSkill:        s.deleteSkill,
+				LoadSkillFile:      s.loadSkillFile,
+				ListWorkspaceFiles: s.listWorkspaceFiles,
+				GetWorkspaceFile:   s.getWorkspaceFile,
+				PutWorkspaceFile:   s.putWorkspaceFile,
+				DeleteWorkspace:    s.deleteWorkspaceFile,
+				ExportWorkspace:    s.exportWorkspace,
+				ImportWorkspace:    s.importWorkspace,
+				ListChannels:       s.listChannels,
+				ListChannelTypes:   s.listChannelTypes,
+				PutChannels:        s.putChannels,
+				GetChannel:         s.getChannel,
+				PutChannel:         s.putChannel,
+			},
+		},
+		webStaticHandler(s.cfg.WebDir),
+	)
 }
 
 func (s *Server) startCronScheduler() {
@@ -398,19 +376,6 @@ func (s *Server) cronSchedulerTick() {
 			}
 		}(due.JobID)
 	}
-}
-
-func cors(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Request-Id,X-NextAI-Source")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func (s *Server) handleVersion(w http.ResponseWriter, _ *http.Request) {

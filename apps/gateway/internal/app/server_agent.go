@@ -14,6 +14,7 @@ import (
 	"nextai/apps/gateway/internal/provider"
 	"nextai/apps/gateway/internal/repo"
 	"nextai/apps/gateway/internal/runner"
+	agentservice "nextai/apps/gateway/internal/service/agent"
 )
 
 func (s *Server) processAgent(w http.ResponseWriter, r *http.Request) {
@@ -262,8 +263,7 @@ func (s *Server) processAgentWithBody(w http.ResponseWriter, r *http.Request, bo
 
 	reply := ""
 	events := make([]domain.AgentEvent, 0, 12)
-	appendEvent := func(evt domain.AgentEvent) {
-		events = append(events, evt)
+	emitEvent := func(evt domain.AgentEvent) {
 		if !streaming {
 			return
 		}
@@ -272,47 +272,9 @@ func (s *Server) processAgentWithBody(w http.ResponseWriter, r *http.Request, bo
 		flusher.Flush()
 		streamStarted = true
 	}
-	replyChunkSize := replyChunkSizeDefault
-	appendReplyDeltas := func(step int, text string) {
-		for _, chunk := range splitReplyChunks(text, replyChunkSize) {
-			appendEvent(domain.AgentEvent{
-				Type:  "assistant_delta",
-				Step:  step,
-				Delta: chunk,
-			})
-		}
-	}
-
-	if hasToolCall {
-		step := 1
-		appendEvent(domain.AgentEvent{Type: "step_started", Step: step})
-		appendEvent(domain.AgentEvent{
-			Type: "tool_call",
-			Step: step,
-			ToolCall: &domain.AgentToolCallPayload{
-				Name:  requestedToolCall.Name,
-				Input: safeMap(requestedToolCall.Input),
-			},
-		})
-		reply, err = s.executeToolCall(requestedToolCall)
-		if err != nil {
-			status, code, message := mapToolError(err)
-			streamFail(status, code, message, nil)
-			return
-		}
-		appendEvent(domain.AgentEvent{
-			Type: "tool_result",
-			Step: step,
-			ToolResult: &domain.AgentToolResultPayload{
-				Name:    requestedToolCall.Name,
-				OK:      true,
-				Summary: summarizeAgentEventText(reply),
-			},
-		})
-		appendReplyDeltas(step, reply)
-		appendEvent(domain.AgentEvent{Type: "completed", Step: step, Reply: reply})
-	} else {
-		generateConfig := runner.GenerateConfig{}
+	effectiveInput := []domain.AgentInputMessage{}
+	generateConfig := runner.GenerateConfig{}
+	if !hasToolCall {
 		if activeLLM.ProviderID == "" || strings.TrimSpace(activeLLM.Model) == "" {
 			generateConfig = runner.GenerateConfig{
 				ProviderID: runner.ProviderDemo,
@@ -340,168 +302,36 @@ func (s *Server) processAgentWithBody(w http.ResponseWriter, r *http.Request, bo
 				TimeoutMS:  providerSetting.TimeoutMS,
 			}
 		}
-
-		effectiveReq := req
 		if len(historyInput) > 0 {
-			effectiveReq.Input = prependSystemLayers(historyInput, systemLayers)
+			effectiveInput = prependSystemLayers(historyInput, systemLayers)
 		} else {
-			effectiveReq.Input = prependSystemLayers(req.Input, systemLayers)
-		}
-		workflowInput := cloneAgentInputMessages(effectiveReq.Input)
-		step := 1
-
-		for {
-			appendEvent(domain.AgentEvent{Type: "step_started", Step: step})
-			turnReq := effectiveReq
-			turnReq.Input = workflowInput
-			stepHadStreamingDelta := false
-			turn, runErr := runner.TurnResult{}, error(nil)
-			if streaming {
-				turn, runErr = s.runner.GenerateTurnStream(r.Context(), turnReq, generateConfig, s.listToolDefinitions(), func(delta string) {
-					if delta == "" {
-						return
-					}
-					stepHadStreamingDelta = true
-					appendEvent(domain.AgentEvent{
-						Type:  "assistant_delta",
-						Step:  step,
-						Delta: delta,
-					})
-				})
-			} else {
-				turn, runErr = s.runner.GenerateTurn(r.Context(), turnReq, generateConfig, s.listToolDefinitions())
-			}
-			if runErr != nil {
-				if recoveredCall, recovered := recoverInvalidProviderToolCall(runErr, step); recovered {
-					appendEvent(domain.AgentEvent{
-						Type: "tool_call",
-						Step: step,
-						ToolCall: &domain.AgentToolCallPayload{
-							Name:  recoveredCall.Name,
-							Input: safeMap(recoveredCall.Input),
-						},
-					})
-					appendEvent(domain.AgentEvent{
-						Type: "tool_result",
-						Step: step,
-						ToolResult: &domain.AgentToolResultPayload{
-							Name:    recoveredCall.Name,
-							OK:      false,
-							Summary: summarizeAgentEventText(recoveredCall.Feedback),
-						},
-					})
-					workflowInput = append(workflowInput,
-						domain.AgentInputMessage{
-							Role:    "assistant",
-							Type:    "message",
-							Content: []domain.RuntimeContent{},
-							Metadata: map[string]interface{}{
-								"tool_calls": []map[string]interface{}{
-									{
-										"id":   recoveredCall.ID,
-										"type": "function",
-										"function": map[string]interface{}{
-											"name":      recoveredCall.Name,
-											"arguments": recoveredCall.RawArguments,
-										},
-									},
-								},
-							},
-						},
-						domain.AgentInputMessage{
-							Role:    "tool",
-							Type:    "message",
-							Content: []domain.RuntimeContent{{Type: "text", Text: recoveredCall.Feedback}},
-							Metadata: map[string]interface{}{
-								"tool_call_id": recoveredCall.ID,
-								"name":         recoveredCall.Name,
-							},
-						},
-					)
-					step++
-					continue
-				}
-				status, code, message := mapRunnerError(runErr)
-				streamFail(status, code, message, nil)
-				return
-			}
-			if len(turn.ToolCalls) == 0 {
-				reply = strings.TrimSpace(turn.Text)
-				if reply == "" {
-					reply = "(empty reply)"
-				}
-				if !streaming || !stepHadStreamingDelta {
-					appendReplyDeltas(step, reply)
-				}
-				appendEvent(domain.AgentEvent{Type: "completed", Step: step, Reply: reply})
-				break
-			}
-
-			assistantMessage := domain.AgentInputMessage{
-				Role:     "assistant",
-				Type:     "message",
-				Content:  []domain.RuntimeContent{},
-				Metadata: map[string]interface{}{"tool_calls": toAgentToolCallMetadata(turn.ToolCalls)},
-			}
-			if text := strings.TrimSpace(turn.Text); text != "" {
-				assistantMessage.Content = []domain.RuntimeContent{{Type: "text", Text: text}}
-			}
-			workflowInput = append(workflowInput, assistantMessage)
-
-			for _, call := range turn.ToolCalls {
-				appendEvent(domain.AgentEvent{
-					Type: "tool_call",
-					Step: step,
-					ToolCall: &domain.AgentToolCallPayload{
-						Name:  call.Name,
-						Input: safeMap(call.Arguments),
-					},
-				})
-				toolReply, toolErr := s.executeToolCall(toolCall{Name: call.Name, Input: safeMap(call.Arguments)})
-				if toolErr != nil {
-					toolReply = formatToolErrorFeedback(toolErr)
-					appendEvent(domain.AgentEvent{
-						Type: "tool_result",
-						Step: step,
-						ToolResult: &domain.AgentToolResultPayload{
-							Name:    call.Name,
-							OK:      false,
-							Summary: summarizeAgentEventText(toolReply),
-						},
-					})
-					workflowInput = append(workflowInput, domain.AgentInputMessage{
-						Role:    "tool",
-						Type:    "message",
-						Content: []domain.RuntimeContent{{Type: "text", Text: toolReply}},
-						Metadata: map[string]interface{}{
-							"tool_call_id": call.ID,
-							"name":         call.Name,
-						},
-					})
-					continue
-				}
-				appendEvent(domain.AgentEvent{
-					Type: "tool_result",
-					Step: step,
-					ToolResult: &domain.AgentToolResultPayload{
-						Name:    call.Name,
-						OK:      true,
-						Summary: summarizeAgentEventText(toolReply),
-					},
-				})
-				workflowInput = append(workflowInput, domain.AgentInputMessage{
-					Role:    "tool",
-					Type:    "message",
-					Content: []domain.RuntimeContent{{Type: "text", Text: toolReply}},
-					Metadata: map[string]interface{}{
-						"tool_call_id": call.ID,
-						"name":         call.Name,
-					},
-				})
-			}
-			step++
+			effectiveInput = prependSystemLayers(req.Input, systemLayers)
 		}
 	}
+
+	processResult, processErr := s.getAgentService().Process(
+		r.Context(),
+		agentservice.ProcessParams{
+			Request: req,
+			RequestedToolCall: agentservice.ToolCall{
+				Name:  requestedToolCall.Name,
+				Input: requestedToolCall.Input,
+			},
+			HasToolCall:    hasToolCall,
+			Streaming:      streaming,
+			ReplyChunkSize: replyChunkSizeDefault,
+			GenerateConfig: generateConfig,
+			EffectiveInput: effectiveInput,
+		},
+		emitEvent,
+	)
+	if processErr != nil {
+		streamFail(processErr.Status, processErr.Code, processErr.Message, processErr.Details)
+		return
+	}
+	reply = processResult.Reply
+	events = processResult.Events
+
 	assistant := domain.RuntimeMessage{
 		ID:      newID("msg"),
 		Role:    "assistant",

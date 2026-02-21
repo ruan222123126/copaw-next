@@ -256,9 +256,9 @@ Domain & Infra Adapters
 
 ## 12. 推进看板（交接持续更新）
 
-- [ ] PR-1 阶段 0：测试护栏
-- [ ] PR-2 阶段 1：Transport 拆分
-- [ ] PR-3 阶段 2A：Agent Service
+- [x] PR-1 阶段 0：测试护栏
+- [x] PR-2 阶段 1：Transport 拆分
+- [x] PR-3 阶段 2A：Agent Service
 - [ ] PR-4 阶段 2B：Cron Service
 - [ ] PR-5 阶段 2C：Workspace/Model Service
 - [ ] PR-6 阶段 3：Ports + Adapters
