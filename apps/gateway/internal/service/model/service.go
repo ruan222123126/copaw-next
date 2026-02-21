@@ -10,6 +10,7 @@ import (
 	"nextai/apps/gateway/internal/domain"
 	"nextai/apps/gateway/internal/provider"
 	"nextai/apps/gateway/internal/repo"
+	"nextai/apps/gateway/internal/service/ports"
 )
 
 var ErrProviderNotFound = errors.New("provider_not_found")
@@ -28,13 +29,8 @@ func (e *ValidationError) Error() string {
 	return e.Message
 }
 
-type StateStore interface {
-	Read(func(state *repo.State))
-	Write(func(state *repo.State) error) error
-}
-
 type Dependencies struct {
-	Store     StateStore
+	Store     ports.StateStore
 	EnvLookup func(string) string
 }
 

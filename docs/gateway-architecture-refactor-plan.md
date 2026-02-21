@@ -261,7 +261,7 @@ Domain & Infra Adapters
 - [x] PR-3 阶段 2A：Agent Service
 - [x] PR-4 阶段 2B：Cron Service
 - [x] PR-5 阶段 2C：Workspace/Model Service
-- [ ] PR-6 阶段 3：Ports + Adapters
+- [x] PR-6 阶段 3：Ports + Adapters
 - [ ] PR-7 阶段 4/5：SystemPrompt 收敛 + 治理
 
 > 维护规则：每完成一个 PR，必须同时更新本节勾选状态与 `docs/TODO.md` 的时间线记录。

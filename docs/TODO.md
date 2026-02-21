@@ -1,6 +1,6 @@
 # NextAI TODO
 
-更新时间：2026-02-21 16:05:55 +0800
+更新时间：2026-02-21 16:21:21 +0800
 
 ## 执行约定（强制）
 - 每位接手 AI 开始前，必须先阅读本文件与 `/home/ruan/.codex/handoff/latest.md`。
@@ -29,6 +29,8 @@
 - [x] `docs/v1-roadmap.md`、`docs/contracts.md`、本地开发文档、部署文档与发布模板已完成。
 
 ## 6. 实操验证（汇总）
+- [x] 2026-02-21 16:21 +0800 阶段 3 Ports/Adapters 落地：新增 `apps/gateway/internal/service/ports/{agent,channel,state_store}.go` 与 `apps/gateway/internal/service/adapters/{agent_runtime,channel_resolver,repo_state_store}.go`，抽象 `StateStore/AgentRunner/ToolRuntime/ErrorMapper/ChannelResolver` 端口；`agent/cron/model/workspace` service 依赖统一切换到 ports；`apps/gateway/internal/app/server.go` 新增 `stateStore` 组合根注入，`server_*_service.go` wiring 改为通过 adapters 组装。
+- [x] 2026-02-21 16:21 +0800 阶段 3 单测与回归验证：执行 `cd apps/gateway && go test ./internal/service/agent ./internal/service/cron ./internal/service/model ./internal/service/workspace ./internal/app && go test ./...` 全部通过，行为语义保持兼容。
 - [x] 2026-02-21 16:05 +0800 阶段 2C Workspace/Model Service 落地：新增 `apps/gateway/internal/service/model/service.go`、`apps/gateway/internal/service/workspace/service.go` 及对应单测，将 provider/catalog/active-model 与 workspace files/import/export 编排下沉到 service；新增 `apps/gateway/internal/app/server_model_service.go`、`apps/gateway/internal/app/server_workspace_service.go` 完成 wiring，`apps/gateway/internal/app/server_admin.go` 收敛为 HTTP 协议适配与错误映射。
 - [x] 2026-02-21 16:05 +0800 阶段 2C 单测与回归验证：执行 `cd apps/gateway && go test ./internal/service/model ./internal/service/workspace ./internal/app && go test ./...` 全部通过，workspace/models 契约回归语义保持不变。
 - [x] 2026-02-21 15:49 +0800 阶段 2B Cron Service 落地：新增 `apps/gateway/internal/service/cron/service.go` 与 `apps/gateway/internal/service/cron/service_test.go`，将 Cron 的 CRUD、调度 tick、执行与 workflow 计划/状态变更下沉到 service；`apps/gateway/internal/app/server_cron.go` 收敛为 HTTP 协议适配与错误映射，`apps/gateway/internal/app/server.go` 的 `cronSchedulerTick` 改为调用 cron service。

@@ -13,6 +13,6 @@ func (s *Server) getModelService() *modelservice.Service {
 
 func (s *Server) newModelService() *modelservice.Service {
 	return modelservice.NewService(modelservice.Dependencies{
-		Store: s.store,
+		Store: s.stateStore,
 	})
 }

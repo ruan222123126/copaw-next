@@ -10,7 +10,9 @@ import (
 	"strings"
 
 	"nextai/apps/gateway/internal/domain"
+	"nextai/apps/gateway/internal/service/adapters"
 	cronservice "nextai/apps/gateway/internal/service/cron"
+	"nextai/apps/gateway/internal/service/ports"
 )
 
 func (s *Server) getCronService() *cronservice.Service {
@@ -22,9 +24,13 @@ func (s *Server) getCronService() *cronservice.Service {
 
 func (s *Server) newCronService() *cronservice.Service {
 	return cronservice.NewService(cronservice.Dependencies{
-		Store:          s.store,
-		DataDir:        s.cfg.DataDir,
-		ResolveChannel: s.resolveChannel,
+		Store:   s.stateStore,
+		DataDir: s.cfg.DataDir,
+		ChannelResolver: adapters.ChannelResolver{
+			ResolveChannelFunc: func(name string) (ports.Channel, map[string]interface{}, string, error) {
+				return s.resolveChannel(name)
+			},
+		},
 		ExecuteConsoleAgentTask: func(ctx context.Context, job domain.CronJobSpec, text string) error {
 			return s.executeCronConsoleAgentTask(ctx, job, text)
 		},

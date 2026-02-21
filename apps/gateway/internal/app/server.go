@@ -25,9 +25,11 @@ import (
 	"nextai/apps/gateway/internal/plugin"
 	"nextai/apps/gateway/internal/repo"
 	"nextai/apps/gateway/internal/runner"
+	"nextai/apps/gateway/internal/service/adapters"
 	agentservice "nextai/apps/gateway/internal/service/agent"
 	cronservice "nextai/apps/gateway/internal/service/cron"
 	modelservice "nextai/apps/gateway/internal/service/model"
+	"nextai/apps/gateway/internal/service/ports"
 	workspaceservice "nextai/apps/gateway/internal/service/workspace"
 )
 
@@ -102,6 +104,7 @@ type cronWorkflowPlan struct {
 type Server struct {
 	cfg              config.Config
 	store            *repo.Store
+	stateStore       ports.StateStore
 	runner           *runner.Runner
 	channels         map[string]plugin.ChannelPlugin
 	tools            map[string]plugin.ToolPlugin
@@ -128,11 +131,12 @@ func NewServer(cfg config.Config) (*Server, error) {
 		return nil, err
 	}
 	srv := &Server{
-		cfg:      cfg,
-		store:    store,
-		runner:   runner.New(),
-		channels: map[string]plugin.ChannelPlugin{},
-		tools:    map[string]plugin.ToolPlugin{},
+		cfg:        cfg,
+		store:      store,
+		stateStore: adapters.NewRepoStateStore(store),
+		runner:     runner.New(),
+		channels:   map[string]plugin.ChannelPlugin{},
+		tools:      map[string]plugin.ToolPlugin{},
 		disabledTools: parseDisabledTools(
 			os.Getenv(disabledToolsEnv),
 		),

@@ -19,8 +19,8 @@ import (
 	cronv3 "github.com/robfig/cron/v3"
 
 	"nextai/apps/gateway/internal/domain"
-	"nextai/apps/gateway/internal/plugin"
 	"nextai/apps/gateway/internal/repo"
+	"nextai/apps/gateway/internal/service/ports"
 )
 
 const (
@@ -97,19 +97,12 @@ func (e *channelError) Unwrap() error {
 	return e.Err
 }
 
-type StateStore interface {
-	Read(func(state *repo.State))
-	Write(func(state *repo.State) error) error
-}
-
 type TaskExecutor func(ctx context.Context, job domain.CronJobSpec) (handled bool, err error)
 
-type ChannelResolver func(name string) (plugin.ChannelPlugin, map[string]interface{}, string, error)
-
 type Dependencies struct {
-	Store                   StateStore
+	Store                   ports.StateStore
 	DataDir                 string
-	ResolveChannel          ChannelResolver
+	ChannelResolver         ports.ChannelResolver
 	ExecuteConsoleAgentTask func(ctx context.Context, job domain.CronJobSpec, text string) error
 	ExecuteTask             TaskExecutor
 }
@@ -444,10 +437,10 @@ func (s *Service) executeTextTask(ctx context.Context, job domain.CronJobSpec, t
 	if channelName == qqChannelName {
 		return errors.New("cron dispatch channel \"qq\" is inbound-only; use channel \"console\" to persist chat history")
 	}
-	if s.deps.ResolveChannel == nil {
+	if s.deps.ChannelResolver == nil {
 		return errors.New("cron channel resolver is unavailable")
 	}
-	channelPlugin, channelCfg, resolvedChannelName, err := s.deps.ResolveChannel(channelName)
+	channelPlugin, channelCfg, resolvedChannelName, err := s.deps.ChannelResolver.ResolveChannel(channelName)
 	if err != nil {
 		return err
 	}

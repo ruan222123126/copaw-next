@@ -8,31 +8,36 @@ import (
 
 	"nextai/apps/gateway/internal/domain"
 	"nextai/apps/gateway/internal/runner"
+	"nextai/apps/gateway/internal/service/adapters"
 )
 
 func TestProcessToolCallSuccess(t *testing.T) {
 	t.Parallel()
 
 	svc := NewService(Dependencies{
-		GenerateTurn: func(context.Context, domain.AgentProcessRequest, runner.GenerateConfig, []runner.ToolDefinition) (runner.TurnResult, error) {
-			t.Fatalf("GenerateTurn should not be called when has tool call")
-			return runner.TurnResult{}, nil
+		Runner: adapters.AgentRunner{
+			GenerateTurnFunc: func(context.Context, domain.AgentProcessRequest, runner.GenerateConfig, []runner.ToolDefinition) (runner.TurnResult, error) {
+				t.Fatalf("GenerateTurn should not be called when has tool call")
+				return runner.TurnResult{}, nil
+			},
+			GenerateTurnStreamFunc: func(context.Context, domain.AgentProcessRequest, runner.GenerateConfig, []runner.ToolDefinition, func(string)) (runner.TurnResult, error) {
+				t.Fatalf("GenerateTurnStream should not be called when has tool call")
+				return runner.TurnResult{}, nil
+			},
 		},
-		GenerateTurnStream: func(context.Context, domain.AgentProcessRequest, runner.GenerateConfig, []runner.ToolDefinition, func(string)) (runner.TurnResult, error) {
-			t.Fatalf("GenerateTurnStream should not be called when has tool call")
-			return runner.TurnResult{}, nil
+		ToolRuntime: adapters.AgentToolRuntime{
+			ListToolDefinitionsFunc: func() []runner.ToolDefinition { return nil },
+			ExecuteToolCallFunc: func(name string, _ map[string]interface{}) (string, error) {
+				if name != "shell" {
+					t.Fatalf("unexpected tool name: %s", name)
+				}
+				return "ok", nil
+			},
 		},
-		ListToolDefinitions: func() []runner.ToolDefinition { return nil },
-		ExecuteToolCall: func(call ToolCall) (string, error) {
-			if call.Name != "shell" {
-				t.Fatalf("unexpected tool name: %s", call.Name)
-			}
-			return "ok", nil
+		ErrorMapper: adapters.AgentErrorMapper{
+			MapToolErrorFunc:   func(err error) (int, string, string) { return http.StatusBadRequest, "tool_error", err.Error() },
+			MapRunnerErrorFunc: func(err error) (int, string, string) { return http.StatusBadGateway, "runner_error", err.Error() },
 		},
-		RecoverInvalidProviderToolCall: func(error, int) (RecoverableProviderToolCall, bool) { return RecoverableProviderToolCall{}, false },
-		FormatToolErrorFeedback:        func(err error) string { return err.Error() },
-		MapToolError:                   func(err error) (int, string, string) { return http.StatusBadRequest, "tool_error", err.Error() },
-		MapRunnerError:                 func(err error) (int, string, string) { return http.StatusBadGateway, "runner_error", err.Error() },
 	})
 
 	result, processErr := svc.Process(context.Background(), ProcessParams{
@@ -59,37 +64,41 @@ func TestProcessRunnerLoopWithToolCallAndStreamDelta(t *testing.T) {
 
 	step := 0
 	svc := NewService(Dependencies{
-		GenerateTurn: func(context.Context, domain.AgentProcessRequest, runner.GenerateConfig, []runner.ToolDefinition) (runner.TurnResult, error) {
-			t.Fatalf("GenerateTurn should not be called for streaming mode")
-			return runner.TurnResult{}, nil
-		},
-		GenerateTurnStream: func(_ context.Context, _ domain.AgentProcessRequest, _ runner.GenerateConfig, _ []runner.ToolDefinition, onDelta func(string)) (runner.TurnResult, error) {
-			step++
-			if step == 1 {
-				return runner.TurnResult{
-					ToolCalls: []runner.ToolCall{
-						{
-							ID:        "call_1",
-							Name:      "view",
-							Arguments: map[string]interface{}{"path": "/tmp/a.txt"},
+		Runner: adapters.AgentRunner{
+			GenerateTurnFunc: func(context.Context, domain.AgentProcessRequest, runner.GenerateConfig, []runner.ToolDefinition) (runner.TurnResult, error) {
+				t.Fatalf("GenerateTurn should not be called for streaming mode")
+				return runner.TurnResult{}, nil
+			},
+			GenerateTurnStreamFunc: func(_ context.Context, _ domain.AgentProcessRequest, _ runner.GenerateConfig, _ []runner.ToolDefinition, onDelta func(string)) (runner.TurnResult, error) {
+				step++
+				if step == 1 {
+					return runner.TurnResult{
+						ToolCalls: []runner.ToolCall{
+							{
+								ID:        "call_1",
+								Name:      "view",
+								Arguments: map[string]interface{}{"path": "/tmp/a.txt"},
+							},
 						},
-					},
-				}, nil
-			}
-			onDelta("hello")
-			return runner.TurnResult{Text: "hello"}, nil
+					}, nil
+				}
+				onDelta("hello")
+				return runner.TurnResult{Text: "hello"}, nil
+			},
 		},
-		ListToolDefinitions: func() []runner.ToolDefinition { return nil },
-		ExecuteToolCall: func(call ToolCall) (string, error) {
-			if call.Name != "view" {
-				t.Fatalf("unexpected tool name: %s", call.Name)
-			}
-			return "tool-ok", nil
+		ToolRuntime: adapters.AgentToolRuntime{
+			ListToolDefinitionsFunc: func() []runner.ToolDefinition { return nil },
+			ExecuteToolCallFunc: func(name string, _ map[string]interface{}) (string, error) {
+				if name != "view" {
+					t.Fatalf("unexpected tool name: %s", name)
+				}
+				return "tool-ok", nil
+			},
 		},
-		RecoverInvalidProviderToolCall: func(error, int) (RecoverableProviderToolCall, bool) { return RecoverableProviderToolCall{}, false },
-		FormatToolErrorFeedback:        func(err error) string { return err.Error() },
-		MapToolError:                   func(err error) (int, string, string) { return http.StatusBadRequest, "tool_error", err.Error() },
-		MapRunnerError:                 func(err error) (int, string, string) { return http.StatusBadGateway, "runner_error", err.Error() },
+		ErrorMapper: adapters.AgentErrorMapper{
+			MapToolErrorFunc:   func(err error) (int, string, string) { return http.StatusBadRequest, "tool_error", err.Error() },
+			MapRunnerErrorFunc: func(err error) (int, string, string) { return http.StatusBadGateway, "runner_error", err.Error() },
+		},
 	})
 
 	emitted := make([]domain.AgentEvent, 0, 8)
@@ -124,26 +133,30 @@ func TestProcessRunnerErrorMapped(t *testing.T) {
 
 	boom := errors.New("boom")
 	svc := NewService(Dependencies{
-		GenerateTurn: func(context.Context, domain.AgentProcessRequest, runner.GenerateConfig, []runner.ToolDefinition) (runner.TurnResult, error) {
-			return runner.TurnResult{}, boom
+		Runner: adapters.AgentRunner{
+			GenerateTurnFunc: func(context.Context, domain.AgentProcessRequest, runner.GenerateConfig, []runner.ToolDefinition) (runner.TurnResult, error) {
+				return runner.TurnResult{}, boom
+			},
+			GenerateTurnStreamFunc: func(context.Context, domain.AgentProcessRequest, runner.GenerateConfig, []runner.ToolDefinition, func(string)) (runner.TurnResult, error) {
+				t.Fatalf("GenerateTurnStream should not be called")
+				return runner.TurnResult{}, nil
+			},
 		},
-		GenerateTurnStream: func(context.Context, domain.AgentProcessRequest, runner.GenerateConfig, []runner.ToolDefinition, func(string)) (runner.TurnResult, error) {
-			t.Fatalf("GenerateTurnStream should not be called")
-			return runner.TurnResult{}, nil
+		ToolRuntime: adapters.AgentToolRuntime{
+			ListToolDefinitionsFunc: func() []runner.ToolDefinition { return nil },
+			ExecuteToolCallFunc: func(string, map[string]interface{}) (string, error) {
+				t.Fatalf("ExecuteToolCall should not be called")
+				return "", nil
+			},
 		},
-		ListToolDefinitions: func() []runner.ToolDefinition { return nil },
-		ExecuteToolCall: func(ToolCall) (string, error) {
-			t.Fatalf("ExecuteToolCall should not be called")
-			return "", nil
-		},
-		RecoverInvalidProviderToolCall: func(error, int) (RecoverableProviderToolCall, bool) { return RecoverableProviderToolCall{}, false },
-		FormatToolErrorFeedback:        func(err error) string { return err.Error() },
-		MapToolError:                   func(err error) (int, string, string) { return http.StatusBadRequest, "tool_error", err.Error() },
-		MapRunnerError: func(err error) (int, string, string) {
-			if !errors.Is(err, boom) {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			return http.StatusBadGateway, "provider_invalid_reply", "provider invalid reply"
+		ErrorMapper: adapters.AgentErrorMapper{
+			MapToolErrorFunc: func(err error) (int, string, string) { return http.StatusBadRequest, "tool_error", err.Error() },
+			MapRunnerErrorFunc: func(err error) (int, string, string) {
+				if !errors.Is(err, boom) {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return http.StatusBadGateway, "provider_invalid_reply", "provider invalid reply"
+			},
 		},
 	})
 

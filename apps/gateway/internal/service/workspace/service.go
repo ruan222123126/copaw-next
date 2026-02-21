@@ -11,6 +11,7 @@ import (
 
 	"nextai/apps/gateway/internal/domain"
 	"nextai/apps/gateway/internal/repo"
+	"nextai/apps/gateway/internal/service/ports"
 )
 
 const (
@@ -85,13 +86,8 @@ type ImportRequest struct {
 	Payload ExportPayload `json:"payload"`
 }
 
-type StateStore interface {
-	Read(func(state *repo.State))
-	Write(func(state *repo.State) error) error
-}
-
 type Dependencies struct {
-	Store             StateStore
+	Store             ports.StateStore
 	DataDir           string
 	SupportedChannels map[string]struct{}
 	IsTextFilePath    func(string) bool

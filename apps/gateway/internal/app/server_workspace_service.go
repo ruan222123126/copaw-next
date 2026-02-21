@@ -18,7 +18,7 @@ func (s *Server) newWorkspaceService() *workspaceservice.Service {
 	}
 
 	return workspaceservice.NewService(workspaceservice.Dependencies{
-		Store:             s.store,
+		Store:             s.stateStore,
 		DataDir:           s.cfg.DataDir,
 		SupportedChannels: supportedChannels,
 		IsTextFilePath: func(path string) bool {

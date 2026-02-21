@@ -9,19 +9,12 @@ import (
 
 	"nextai/apps/gateway/internal/domain"
 	"nextai/apps/gateway/internal/runner"
+	"nextai/apps/gateway/internal/service/ports"
 )
 
 type ToolCall struct {
 	Name  string
 	Input map[string]interface{}
-}
-
-type RecoverableProviderToolCall struct {
-	ID           string
-	Name         string
-	RawArguments string
-	Input        map[string]interface{}
-	Feedback     string
 }
 
 type ProcessParams struct {
@@ -54,14 +47,9 @@ func (e *ProcessError) Error() string {
 }
 
 type Dependencies struct {
-	GenerateTurn                   func(ctx context.Context, req domain.AgentProcessRequest, cfg runner.GenerateConfig, tools []runner.ToolDefinition) (runner.TurnResult, error)
-	GenerateTurnStream             func(ctx context.Context, req domain.AgentProcessRequest, cfg runner.GenerateConfig, tools []runner.ToolDefinition, onDelta func(string)) (runner.TurnResult, error)
-	ListToolDefinitions            func() []runner.ToolDefinition
-	ExecuteToolCall                func(call ToolCall) (string, error)
-	RecoverInvalidProviderToolCall func(err error, step int) (RecoverableProviderToolCall, bool)
-	FormatToolErrorFeedback        func(err error) string
-	MapToolError                   func(err error) (status int, code string, message string)
-	MapRunnerError                 func(err error) (status int, code string, message string)
+	Runner      ports.AgentRunner
+	ToolRuntime ports.AgentToolRuntime
+	ErrorMapper ports.AgentErrorMapper
 }
 
 type Service struct {
@@ -125,9 +113,9 @@ func (s *Service) Process(
 				Input: safeMap(params.RequestedToolCall.Input),
 			},
 		})
-		toolReply, err := s.deps.ExecuteToolCall(params.RequestedToolCall)
+		toolReply, err := s.deps.ToolRuntime.ExecuteToolCall(params.RequestedToolCall.Name, params.RequestedToolCall.Input)
 		if err != nil {
-			status, code, message := s.deps.MapToolError(err)
+			status, code, message := s.deps.ErrorMapper.MapToolError(err)
 			return ProcessResult{}, &ProcessError{Status: status, Code: code, Message: message}
 		}
 		reply = toolReply
@@ -159,7 +147,7 @@ func (s *Service) Process(
 			runErr error
 		)
 		if params.Streaming {
-			turn, runErr = s.deps.GenerateTurnStream(ctx, turnReq, params.GenerateConfig, s.deps.ListToolDefinitions(), func(delta string) {
+			turn, runErr = s.deps.Runner.GenerateTurnStream(ctx, turnReq, params.GenerateConfig, s.deps.ToolRuntime.ListToolDefinitions(), func(delta string) {
 				if delta == "" {
 					return
 				}
@@ -171,10 +159,10 @@ func (s *Service) Process(
 				})
 			})
 		} else {
-			turn, runErr = s.deps.GenerateTurn(ctx, turnReq, params.GenerateConfig, s.deps.ListToolDefinitions())
+			turn, runErr = s.deps.Runner.GenerateTurn(ctx, turnReq, params.GenerateConfig, s.deps.ToolRuntime.ListToolDefinitions())
 		}
 		if runErr != nil {
-			if recoveredCall, recovered := s.deps.RecoverInvalidProviderToolCall(runErr, step); recovered {
+			if recoveredCall, recovered := s.deps.ToolRuntime.RecoverInvalidProviderToolCall(runErr, step); recovered {
 				appendEvent(domain.AgentEvent{
 					Type: "tool_call",
 					Step: step,
@@ -223,7 +211,7 @@ func (s *Service) Process(
 				step++
 				continue
 			}
-			status, code, message := s.deps.MapRunnerError(runErr)
+			status, code, message := s.deps.ErrorMapper.MapRunnerError(runErr)
 			return ProcessResult{}, &ProcessError{Status: status, Code: code, Message: message}
 		}
 		if len(turn.ToolCalls) == 0 {
@@ -258,9 +246,9 @@ func (s *Service) Process(
 					Input: safeMap(call.Arguments),
 				},
 			})
-			toolReply, toolErr := s.deps.ExecuteToolCall(ToolCall{Name: call.Name, Input: safeMap(call.Arguments)})
+			toolReply, toolErr := s.deps.ToolRuntime.ExecuteToolCall(call.Name, safeMap(call.Arguments))
 			if toolErr != nil {
-				toolReply = s.deps.FormatToolErrorFeedback(toolErr)
+				toolReply = s.deps.ToolRuntime.FormatToolErrorFeedback(toolErr)
 				appendEvent(domain.AgentEvent{
 					Type: "tool_result",
 					Step: step,
@@ -308,22 +296,12 @@ func (s *Service) Process(
 
 func (s *Service) validateDependencies() error {
 	switch {
-	case s.deps.GenerateTurn == nil:
-		return errors.New("missing GenerateTurn dependency")
-	case s.deps.GenerateTurnStream == nil:
-		return errors.New("missing GenerateTurnStream dependency")
-	case s.deps.ListToolDefinitions == nil:
-		return errors.New("missing ListToolDefinitions dependency")
-	case s.deps.ExecuteToolCall == nil:
-		return errors.New("missing ExecuteToolCall dependency")
-	case s.deps.RecoverInvalidProviderToolCall == nil:
-		return errors.New("missing RecoverInvalidProviderToolCall dependency")
-	case s.deps.FormatToolErrorFeedback == nil:
-		return errors.New("missing FormatToolErrorFeedback dependency")
-	case s.deps.MapToolError == nil:
-		return errors.New("missing MapToolError dependency")
-	case s.deps.MapRunnerError == nil:
-		return errors.New("missing MapRunnerError dependency")
+	case s.deps.Runner == nil:
+		return errors.New("missing agent runner dependency")
+	case s.deps.ToolRuntime == nil:
+		return errors.New("missing agent tool runtime dependency")
+	case s.deps.ErrorMapper == nil:
+		return errors.New("missing agent error mapper dependency")
 	default:
 		return nil
 	}
