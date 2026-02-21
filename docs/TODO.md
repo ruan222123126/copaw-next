@@ -1,6 +1,6 @@
 # NextAI TODO
 
-更新时间：2026-02-17 20:59:54 +0800
+更新时间：2026-02-21 14:55:48 +0800
 
 ## 执行约定（强制）
 - 每位接手 AI 开始前，必须先阅读本文件与 `/home/ruan/.codex/handoff/latest.md`。
@@ -29,6 +29,42 @@
 - [x] `docs/v1-roadmap.md`、`docs/contracts.md`、本地开发文档、部署文档与发布模板已完成。
 
 ## 6. 实操验证（汇总）
+- [x] 2026-02-21 14:55 +0800 阶段 0 护栏收口（成功响应结构快照 + 列表字段稳定性）：在 `apps/gateway/internal/app/contract_regression_test.go` 新增 `/chats`、`/cron/jobs`、`/workspace/files`、`/models/catalog` 列表响应结构稳定性回归，固定关键字段集合与核心嵌套结构；同时新增成功响应结构快照回归（创建 Cron、更新 Workspace env、删除 Provider）。
+- [x] 2026-02-21 14:55 +0800 阶段 0 回归再验证：执行 `cd apps/gateway && go test ./internal/app` 与 `cd apps/gateway && go test ./...` 均通过，新增成功响应快照与列表字段稳定性测试与现有用例兼容。
+- [x] 2026-02-21 14:51 +0800 阶段 0 护栏扩展（cron/workspace/models 契约回归集）：在 `apps/gateway/internal/app/contract_regression_test.go` 新增三组统一接口错误契约表驱动测试，覆盖 `cron`（`invalid_json/invalid_cron_task_type/job_id_mismatch/not_found/default_cron_protected`）、`workspace`（`invalid_path/not_found/invalid_json/invalid_model_slot/provider_not_found/method_not_allowed/invalid_import_mode`）、`models`（`invalid_json/invalid_provider_config/invalid_model_slot/provider_not_found/provider_disabled/model_not_found`）状态码与错误模型快照。
+- [x] 2026-02-21 14:51 +0800 阶段 0 验证通过：执行 `cd apps/gateway && go test ./internal/app` 与 `cd apps/gateway && go test ./...` 均通过，新增回归集与既有测试兼容。
+- [x] 2026-02-21 14:47 +0800 阶段 0 测试护栏首批落地：新增 `apps/gateway/internal/app/contract_regression_test.go`，补充 `mapRunnerError`、`mapChannelError`、`mapToolError` 三组表驱动快照测试，固定 `status/code/message` 映射语义，防止后续重构行为漂移。
+- [x] 2026-02-21 14:47 +0800 黑盒回归补齐：新增 `/agent/process` 流式事件顺序回归（`step_started -> tool_call -> tool_result -> assistant_delta -> completed -> [DONE]`）与 `provider_invalid_reply` 映射回归（模拟 provider 空内容返回，断言 `502 + provider_invalid_reply`）；验证通过 `cd apps/gateway && go test ./internal/app` 与 `cd apps/gateway && go test ./...`。
+- [x] 2026-02-21 14:41 +0800 交接计划文档完善：`docs/gateway-architecture-refactor-plan.md` 从方向性草案升级为可执行版本，新增“阶段 0 详细落地清单”“每阶段输入/输出定义”“PR 执行模板”“推进看板”，可直接作为后续分阶段实施与交接依据。
+- [x] 2026-02-21 14:41 +0800 文档一致性校验：已核对计划文档与仓库约束（v1 范围、契约不变、小步 PR、测试护栏优先）一致，且执行顺序保持“阶段 0 -> 阶段 5”不变。
+- [x] 2026-02-21 14:36 +0800 架构级重构计划文档落地：新增 `docs/gateway-architecture-refactor-plan.md`，针对本轮 `server.go` 文件级拆分后遗留耦合，给出分层目标架构（transport/service/ports-adapters）与分阶段迁移方案。
+- [x] 2026-02-21 14:36 +0800 计划内容已包含：阶段拆分（0-5）、PR 切分策略、测试矩阵、DoD 验收标准、风险与回滚策略，可直接作为后续实施蓝图。
+- [x] 2026-02-21 14:31 +0800 Gateway `server.go` 最小风险拆分落地：按职责将 `apps/gateway/internal/app/server.go` 的大块逻辑迁移到 `server_agent.go`（Agent/Tool/QQ 解析）、`server_cron.go`（Cron 调度与执行）、`server_admin.go`（Models/Skills/Workspace/错误映射与系统层），保留同包同函数签名，业务行为不改。
+- [x] 2026-02-21 14:31 +0800 验证通过：执行 `cd apps/gateway && go test ./internal/app` 与 `cd apps/gateway && go test ./...` 均通过。
+- [x] 2026-02-21 14:17 +0800 Gateway 运行时配置接口落地：`apps/gateway/internal/app/server.go` 新增公开 `GET /runtime-config`（位于 APIKey 中间件外），返回 `features.prompt_templates` 与 `features.prompt_context_introspect`，分别映射 `s.cfg.EnablePromptTemplates` / `s.cfg.EnablePromptContextIntrospect`；新增 `TestRuntimeConfigEndpointReflectsFeatureFlags` 与 `TestRuntimeConfigEndpointBypassesAPIKeyAuth` 回归覆盖。
+- [x] 2026-02-21 14:17 +0800 Web 运行时 flag 接入：`apps/web/src/main.ts` 在 `bootstrap()` 早期拉取 `/runtime-config` 并缓存为 `runtimeFlags`，`expandPromptTemplateIfNeeded` 与 `loadSystemPromptTokens` 改为读取运行时开关；覆盖优先级实现为 `query > localStorage > runtime-config > false`。
+- [x] 2026-02-21 14:17 +0800 验证通过：执行 `cd apps/gateway && go test ./internal/app -run "TestRuntimeConfigEndpointReflectsFeatureFlags|TestRuntimeConfigEndpointBypassesAPIKeyAuth|TestAPIKeyAuthMiddleware|TestHealthz"` 与 `pnpm -C apps/web build` 均通过。
+- [x] 2026-02-21 13:23 +0800 Web 站点图标替换：在 `apps/web/src/index.html` 明确配置 NextAI 自定义 favicon（`rel="icon"` + `rel="apple-touch-icon"`），覆盖浏览器默认/缓存导致的“外部产品风格图标”显示。
+- [x] 2026-02-21 13:23 +0800 验证通过：执行 `pnpm -C apps/web build` 成功，`apps/web/dist/index.html` 已包含新的图标配置。
+- [x] 2026-02-21 13:20 +0800 Web 聊天输入区上下文文案简化：`chat.tokensEstimate` 中/英文去掉“上下文/Context”前缀，仅保留 `{{used}}/{{total}}`，减少视觉噪音。
+- [x] 2026-02-21 13:20 +0800 验证通过：执行 `pnpm -C apps/web build` 成功；`apps/web/src/index.html` 默认占位同步为 `0/128.0k`，启动初始态不再出现 `Tokens:` 标签。
+- [x] 2026-02-21 13:10 +0800 Web 下拉右侧偏宽三次修复：为 `.options-list` 增加 `scrollbar-gutter: auto`，覆盖全局 `* { scrollbar-gutter: stable; }` 在 `overflow: hidden` 容器上的右侧槽位预留，修复下拉面板内容整体“右侧留白偏大”。
+- [x] 2026-02-21 13:10 +0800 验证通过：执行 `pnpm -C apps/web build` 成功，`apps/web/dist/styles.css` 已同步三次修复。
+- [x] 2026-02-21 13:07 +0800 Web 下拉右侧视觉偏宽二次修复：为 `options-body` 显式恢复 `scrollbar-gutter: auto` 并补充 `overflow-x: hidden`，避免继承全局 `scrollbar-gutter: stable` 造成右侧预留槽位；同时为 `option` 增加 `width: 100%` 保证行宽一致。
+- [x] 2026-02-21 13:07 +0800 验证通过：执行 `pnpm -C apps/web build` 成功，`apps/web/dist/styles.css` 已同步二次修复。
+- [x] 2026-02-21 13:02 +0800 Web 选择器卡片对齐修复：调整 `apps/web/src/styles.css` 的自定义下拉样式（`options-body` 改为左右等距内边距，`option` 选项增加圆角与 `box-sizing`），修复“选中项右宽左窄”的视觉不对称。
+- [x] 2026-02-21 13:02 +0800 验证通过：执行 `pnpm -C apps/web build` 成功，`apps/web/dist/styles.css` 已同步最新修复样式。
+- [x] 2026-02-21 12:57 +0800 Web CSS 诊断完成：`apps/web/dist/styles.css` 与 `apps/web/src/styles.css` 的 `sha256` 完全一致（`b2d49c10...`），构建链路确认已同步最新样式文件，不存在“编译后仍指向旧 CSS 文件”问题。
+- [x] 2026-02-21 12:57 +0800 运行实例核对：`127.0.0.1:8088`（systemd）与 `127.0.0.1:18088`（手动 `make gateway`）均在运行，两个端口返回的 `styles.css` 内容与 `Last-Modified` 一致（`Sat, 21 Feb 2026 04:54:36 GMT`），排除端口实例差异导致的 CSS 版本不一致。
+- [x] 2026-02-21 12:54 +0800 Web 旧构建确认：重编译前 `apps/web/dist/index.html` 时间戳为 `2026-02-17 20:59:38 +0800`，明显早于本次会话时间，确认当时为旧产物。
+- [x] 2026-02-21 12:54 +0800 Web 重编译完成：执行 `pnpm -C apps/web build` 通过；构建后 `apps/web/dist/index.html`、`apps/web/dist/main.js`、`apps/web/dist/styles.css` 时间戳已刷新至 `2026-02-21 12:54:36 +0800`。
+- [x] 2026-02-21 12:53 +0800 systemd 常驻切换完成：创建并启用用户级服务 `~/.config/systemd/user/nextai-gateway.service`（`WorkingDirectory=/mnt/Files/NextAI/apps/gateway`，`NEXTAI_ENV_FILE=/mnt/Files/NextAI/.env`，`NEXTAI_WEB_DIR=/mnt/Files/NextAI/apps/web/dist`，`ExecStart=/usr/local/go/bin/go run ./cmd/gateway`）。
+- [x] 2026-02-21 12:53 +0800 `copaw.service` 永久禁用：执行 `systemctl --user disable --now copaw.service`，当前状态为 `disabled + inactive (dead)`，不再随用户会话自动启动抢占 `8088`。
+- [x] 2026-02-21 12:53 +0800 验证通过：`nextai-gateway.service` 状态 `active (running)`，`8088` 监听进程为 `gateway`；`GET /healthz` 返回 `{"ok":true}`，`GET /version` 返回 `{"version":"0.1.0"}`，`GET /` 返回 Web 首页 HTML。
+- [x] 2026-02-21 12:50 +0800 Gateway 静态代理启动 + 8088 清理：先停止并释放占用 `8088` 的 `copaw.service`，再以 `NEXTAI_ENV_FILE=/mnt/Files/NextAI/.env`、`NEXTAI_WEB_DIR=/mnt/Files/NextAI/apps/web/dist` 启动 Gateway（`go run ./cmd/gateway`）。
+- [x] 2026-02-21 12:50 +0800 验证通过：`GET /healthz` 返回 `{"ok":true}`，`GET /version` 返回 `{"version":"0.1.0"}`，`GET /` 返回 Web 首页 HTML（`<!doctype html>`）。
+- [x] 2026-02-21 12:46 +0800 分支清理完成：按“仅保留 `main`”执行删除，本地分支已清理为仅 `main`；远端分支已清理为仅 `origin/main`（执行过 `git push origin --delete <branch>` 与 `git fetch --prune origin` 校验）。其中 `feat/chat-shell-tool-control` 初始因 worktree 占用无法删除，后通过 `git worktree prune` 清理失效 worktree 后已成功删除。
+- [x] 2026-02-21 12:44 +0800 main 最新代码同步：执行 `git fetch origin main` 拉取远端更新，确认 `main` 可快进到 `origin/main`（`merge-base --is-ancestor` 返回 0），随后执行 `git pull --ff-only origin main` 返回 `Already up to date.`，当前本地 `main`/`origin/main` 均为 `634428d`（`Merge pull request #20 from RuanEason/feat/web-gateway-cron-default-guard-upstream`）。
 - [x] 2026-02-17 20:59 +0800 再次发布前回归校验：执行 `cd apps/gateway && go test ./...`、`pnpm -r test`、`pnpm -r build` 全部通过（含 web e2e/cli/smoke/contract）。
 - [x] 2026-02-17 20:57 +0800 Windows shell 兼容修复：`apps/gateway/internal/plugin/shell.go` 改为按平台自动选择执行器（Windows 优先 `powershell`，回退 `cmd`；Linux/macOS 使用 `sh`，无 `sh` 回退 `bash`），解决发布包在 Windows 上固定 `sh -lc` 不可用问题。
 - [x] 2026-02-17 20:57 +0800 错误可观测性增强：`mapToolError` 新增 `ErrShellToolExecutorUnavailable` 映射，返回 `502 tool_runtime_unavailable` + 明确文案 `shell executor is unavailable on current host`。
@@ -306,6 +342,11 @@
 - [x] 2026-02-17 15:30 +0800 服务重启验证：按指定方式去掉代理环境启动 Gateway（`env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy NEXTAI_ALLOW_INSECURE_NO_API_KEY=true make gateway`）并重启 Web（`python3 -m http.server 5173 --bind 127.0.0.1 --directory apps/web/dist`）；`GET /healthz` 返回 `{"ok":true}`、`GET /version` 返回 `{"version":"0.1.0"}`、Web `HEAD /` 返回 `HTTP/1.0 200 OK`，进程环境校验 `proxy_env_absent=yes`。
 - [x] 2026-02-17 13:14 +0800 Web QQ 会话展示修复：聊天列表在 `channel=qq` 时不再携带 `user_id` 过滤，避免入站会话因 `openid` 与控制台 `user_id` 不一致而被隐藏；发送后会话匹配在 QQ 渠道改为按 `session_id+channel`。
 - [x] 2026-02-17 13:14 +0800 验证通过：`pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts`、`pnpm -C apps/web build`。
+- [x] 2026-02-21 13:28 +0800 Prompt 分层三阶段落地：Gateway 将单段 system 重构为多段 system layers（固定顺序 `base_system -> tool_guide_system -> workspace_policy_system -> session_policy_system`），注入位置与工具循环逻辑保持不变；新增可选 `environment_context_system` 层（受 `NEXTAI_ENABLE_PROMPT_CONTEXT_INTROSPECT` 控制）；新增只读接口 `GET /agent/system-layers` 返回实际注入层清单与 token 估算。
+- [x] 2026-02-21 13:28 +0800 Prompt 模板能力落地：新增 `prompts/*.md` 模板源（示例 `prompts/quick-task.md`）；Web 与 CLI TUI 发送前支持 `/prompts:<name> KEY=VALUE` 展开（仅命名参数，缺参与非法参数阻断发送并提示）；保留 `/history` `/new` `/refresh` `/settings` `/exit` 本地 slash 行为不受影响。
+- [x] 2026-02-21 13:28 +0800 可观测与估算一致性落地：Web token 估算新增后端对齐路径，启用 `nextai.feature.prompt_context_introspect` 时优先读取 `/agent/system-layers` 的 `estimated_tokens_total`，失败自动回退旧逻辑；Workspace 保存系统提示文件后触发估算缓存失效重载。
+- [x] 2026-02-21 13:28 +0800 契约与配置同步：更新 `docs/contracts.md`（三阶段与新接口约定）、`apps/gateway/internal/config/config.go` 与 `.env.example`（新增 `NEXTAI_ENABLE_PROMPT_TEMPLATES`、`NEXTAI_ENABLE_PROMPT_CONTEXT_INTROSPECT`，默认 `false`）。
+- [x] 2026-02-21 13:28 +0800 回归验证通过：`cd apps/gateway && go test ./...`、`pnpm -C apps/cli test && pnpm -C apps/cli build`、`pnpm -C apps/web test && pnpm -C apps/web build`。
 
 ## 7. 当前未完成项与阻塞（2026-02-17 15:30:39 +0800）
 - [x] 设计并实现 provider 可删除方案（含内置 provider），并完成 catalog/active/default 语义调整：删除后从 `/models/catalog` 消失；删掉激活 provider 后 `active_llm` 置空。
