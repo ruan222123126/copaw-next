@@ -214,25 +214,15 @@
                           </section>
 
                           <section class="provider-edit-block provider-edit-block-models">
-                            <div class="provider-edit-block-head">
-                              <h4 data-i18n="models.modelManageTitle">Models</h4>
-                              <div class="provider-edit-block-actions">
-                                <button id="models-provider-models-manage-btn" type="button" class="secondary-btn models-manage-btn" data-i18n="models.manageModels">
-                                  Manage
-                                </button>
-                                <button id="models-provider-custom-models-add-btn" type="button" class="secondary-btn models-add-btn" data-i18n="models.addModel">
-                                  Add
-                                </button>
-                              </div>
-                            </div>
                             <div id="models-provider-models-body" class="provider-models-body">
                               <label id="models-provider-custom-models-field" class="provider-config-card">
                                 <span data-i18n="models.customModels">Custom Model Config (optional)</span>
                                 <div class="kv-editor">
                                   <div id="models-provider-custom-models-rows" class="custom-model-rows"></div>
+                                  <button id="models-provider-custom-models-add-btn" type="button" class="secondary-btn" data-i18n="models.addModel">Add</button>
                                 </div>
                               </label>
-                              <label class="provider-config-card">
+                              <label class="provider-config-card" hidden>
                                 <span data-i18n="models.providerAliases">model_aliases (optional)</span>
                                 <div class="kv-editor">
                                   <div id="models-provider-aliases-rows" class="kv-rows" data-kv-kind="aliases"></div>
@@ -377,12 +367,16 @@
                           </div>
                           <button type="button" class="secondary-btn" data-workspace-action="back" data-i18n="workspace.backToCards">Back</button>
                         </div>
-                        <article class="subpanel workspace-file-card">
-                          <div class="workspace-file-card-head">
-                            <h4 class="workspace-file-card-title" data-i18n="workspace.promptCardTitle">Prompt Files</h4>
+                        <ul id="workspace-prompts-body" class="detail-list models-provider-card-grid workspace-file-card-grid workspace-file-cards"></ul>
+                      </section>
+                      <section id="workspace-level2-codex-view" class="models-level models-level-edit" hidden>
+                        <div class="models-level-edit-head">
+                          <div class="models-level-edit-title-group">
+                            <h3 class="settings-section-title" data-i18n="workspace.codexCardTitle">Codex Prompts</h3>
                           </div>
-                          <ul id="workspace-prompts-body" class="detail-list models-provider-card-grid workspace-file-card-grid workspace-file-cards"></ul>
-                        </article>
+                          <button type="button" class="secondary-btn" data-workspace-action="back" data-i18n="workspace.backToCards">Back</button>
+                        </div>
+                        <ul id="workspace-codex-tree-body" class="detail-list workspace-codex-tree"></ul>
                       </section>
                     </div>
                   </section>
@@ -429,7 +423,21 @@
                             <option value="en-US" data-i18n="locale.enUS">English</option>
                           </select>
                         </label>
+                        <label class="provider-basic-field provider-basic-toggle">
+                          <span data-i18n="control.promptContextIntrospect">Prompt Context Introspect</span>
+                          <span class="provider-enabled-toggle">
+                            <input
+                              id="feature-prompt-context-introspect"
+                              class="provider-enabled-toggle-input"
+                              type="checkbox"
+                              role="switch"
+                            />
+                          </span>
+                        </label>
                       </section>
+                      <p class="hint settings-section-hint" data-i18n="control.promptContextIntrospectDesc">
+                        Enable `/agent/system-layers` based context token estimate and environment context layer.
+                      </p>
                     </div>
                   </section>
                 </div>
@@ -489,6 +497,10 @@
                       <path d="M16 16L21 21"></path>
                     </svg>
                   </button>
+                  <label class="chat-prompt-mode-toggle" for="chat-prompt-mode-toggle">
+                    <input id="chat-prompt-mode-toggle" class="chat-prompt-mode-toggle-input" type="checkbox" role="switch" />
+                    <span data-i18n="chat.codexPromptMode">Codex 提示词</span>
+                  </label>
                   <span id="chat-session" class="session-badge"></span>
                 </div>
               </div>
@@ -688,25 +700,21 @@
               关闭
             </button>
           </div>
-          <div class="workspace-editor-modal-content workspace-neumorph">
-            <section class="workspace-neumorph-block">
-              <h3 data-i18n="workspace.editor">配置文件编辑</h3>
-              <form id="workspace-editor-form" class="stack-form">
-                <label>
-                  <span data-i18n="workspace.selectedPath">当前配置文件路径</span>
-                  <input id="workspace-file-path" type="text" readonly />
-                </label>
-                <label>
-                  <span data-i18n="workspace.fileContent">配置内容</span>
-                  <textarea id="workspace-file-content" rows="14" placeholder="{}"></textarea>
-                </label>
-                <div class="actions-row">
-                  <button id="workspace-save-file-btn" type="submit" data-i18n="workspace.saveFile">保存到 PUT /workspace/files/{file_path}</button>
-                  <button id="workspace-delete-file-btn" class="secondary-btn" type="button" data-i18n="workspace.deleteFile">删除文件</button>
-                </div>
-              </form>
-            </section>
-
+          <div class="workspace-editor-modal-content">
+            <form id="workspace-editor-form" class="stack-form">
+              <label>
+                <span data-i18n="workspace.selectedPath">当前配置文件路径</span>
+                <input id="workspace-file-path" type="text" readonly />
+              </label>
+              <label>
+                <span data-i18n="workspace.fileContent">配置内容</span>
+                <textarea id="workspace-file-content" rows="14" placeholder="{}"></textarea>
+              </label>
+              <div class="actions-row">
+                <button id="workspace-save-file-btn" type="submit" data-i18n="workspace.saveFile">保存到 PUT /workspace/files/{file_path}</button>
+                <button id="workspace-delete-file-btn" class="secondary-btn" type="button" data-i18n="workspace.deleteFile">删除文件</button>
+              </div>
+            </form>
           </div>
         </section>
       </div>

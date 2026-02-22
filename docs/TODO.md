@@ -1,6 +1,6 @@
 # NextAI TODO
 
-更新时间：2026-02-21 16:25:54 +0800
+更新时间：2026-02-22 08:40:18 +0800
 
 ## 执行约定（强制）
 - 每位接手 AI 开始前，必须先阅读本文件与 `/home/ruan/.codex/handoff/latest.md`。
@@ -29,6 +29,49 @@
 - [x] `docs/v1-roadmap.md`、`docs/contracts.md`、本地开发文档、部署文档与发布模板已完成。
 
 ## 6. 实操验证（汇总）
+- [x] 2026-02-22 08:40 +0800 工作区分批清理纠偏：将误做的“全量 stash 清理”恢复为“按价值提交 + 噪音清理”流程，三批改动（gateway+docs / web / prompts）均恢复并通过回归后进入提交流程，当前工作区仅保留待提交改动。
+- [x] 2026-02-22 08:40 +0800 验证通过：执行 `cd apps/gateway && go test ./internal/app`、`cd apps/gateway && go test ./...`、`pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts`、`pnpm -C apps/web build` 均通过。
+- [x] 2026-02-22 08:31 +0800 Codex 最小对齐（会话级 prompt_mode）落地：Gateway `POST /agent/process` 新增 `biz_params.prompt_mode(default|codex)` 解析/校验、`chat.meta.prompt_mode` 会话持久化、系统层按模式分派（`default=AGENTS+ai-tools`，`codex=prompts/codex/codex-rs/core/prompt.md` 单层），并补齐 `invalid prompt_mode` 与 `codex_prompt_unavailable` 错误语义；同步更新 `docs/contracts.md` 契约说明。
+- [x] 2026-02-22 08:31 +0800 Web 会话级开关与回归落地：聊天区新增 `Codex 提示词` 开关，打开会话按 `chat.meta.prompt_mode` 回填，新会话默认 `default`，发送链路始终显式透传 `biz_params.prompt_mode` 且保留工具 `biz_params` 合并逻辑；新增 e2e 覆盖“开关透传/会话隔离/新会话默认”。
+- [x] 2026-02-22 08:31 +0800 验证通过：执行 `cd apps/gateway && go test ./internal/app`、`cd apps/gateway && go test ./...`、`pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts`、`pnpm -C apps/web build` 均通过。
+- [x] 2026-02-21 21:36 +0800 Web 配置文件卡片启用/禁用能力落地：更新 `apps/web/src/main.ts`、`apps/web/src/styles.css`、`apps/web/src/locales/{zh-CN,en-US}.ts`，为“配置文件/提示词/codex提示词”三张一级卡片新增启用与禁用切换、禁用态样式、状态提示及本地持久化（`localStorage`）。
+- [x] 2026-02-21 21:36 +0800 验证通过：执行 `pnpm -C apps/web exec vitest run test/e2e/web-shell-tool-flow.test.ts --testNamePattern=\"工作区卡片应支持启用和禁用|工作区应新增 codex 提示词卡片并支持文件夹层层展开\"` 与 `pnpm -C apps/web build` 均通过。
+- [x] 2026-02-21 21:19 +0800 Web codex 提示词目录树底板移除：更新 `apps/web/src/index.html`，在工作区 codex 二级视图中移除 `workspace-file-card` 包裹层与重复标题，目录树改为直接渲染列表。
+- [x] 2026-02-21 21:19 +0800 验证通过：执行 `pnpm -C apps/web build` 成功，前端构建与类型检查通过。
+- [x] 2026-02-21 21:11 +0800 网关进程热重启修复 Workspace 文件缺失：终止旧 `go run ./cmd/gateway` 进程（8088/18088）并按当前源码重启，避免旧进程未加载 `prompts/*` 扫描逻辑导致“codex 提示词空列表”。
+- [x] 2026-02-21 21:11 +0800 验证通过：`GET /workspace/files` 在 8088/18088 均返回 `prompts/codex/*` 共 38 条（含 `prompts/codex/codex-rs/core/prompt.md` 等）。
+- [x] 2026-02-21 21:06 +0800 Web 配置文件页交互调整：按用户要求将 codex 区域从“目录等级卡片”改为“文件夹树形展开”，更新 `apps/web/src/main.ts`（`workspaceCodexTree` 渲染/展开状态/点击展开）与 `apps/web/src/index.html`（`workspace-codex-tree-body`）。
+- [x] 2026-02-21 21:06 +0800 验证通过：执行 `pnpm -C apps/web build` 与 `pnpm -C apps/web exec vitest run test/e2e/web-shell-tool-flow.test.ts --testNamePattern=\"工作区应新增 codex 提示词卡片并支持文件夹层层展开\"` 均通过。
+- [x] 2026-02-21 20:59 +0800 Web 工作区新增 codex 提示词卡片：更新 `apps/web/src/index.html` 与 `apps/web/src/main.ts`，在“配置文件”页新增 `codex提示词` 一级卡片和 `workspace-level2-codex-view` 二级视图，支持 `open-codex` 跳转并展示 `prompts/codex` 文件列表。
+- [x] 2026-02-21 20:59 +0800 codex 目录分级卡片落地与验证：新增按文件夹层级（L1/L2/L3）统计渲染逻辑与文案（`apps/web/src/locales/zh-CN.ts`、`apps/web/src/locales/en-US.ts`），并通过 `pnpm -C apps/web build`、`pnpm -C apps/web exec vitest run test/e2e/web-shell-tool-flow.test.ts --testNamePattern=\"工作区应新增 codex 提示词卡片并按目录等级展示\"`。
+- [x] 2026-02-21 20:41 +0800 提示词拆分迁移：从 `/mnt/Files/codex/new/all-prompts-raw.md` 按 `## Source` 分隔拆分 38 份，写入 `prompts/codex` 并按来源路径映射目录（`codex-rs/...`、`user-codex/...`）。
+- [x] 2026-02-21 20:41 +0800 验证通过：执行 `find prompts/codex -type f | wc -l` 得到 38，抽样核对 `prompts/codex/user-codex/prompts/check-fix.md`、`prompts/codex/codex-rs/core/templates/collaboration_mode/default.md`、`prompts/codex/codex-rs/core/models.json` 内容完整。
+- [x] 2026-02-21 20:37 +0800 Web 配置文件编辑弹窗双层底板修复：更新 `apps/web/src/index.html`，移除 `workspace-editor-modal-content` 内 `workspace-neumorph/workspace-neumorph-block` 双层容器与重复“配置文件编辑”标题，编辑表单改为单层布局。
+- [x] 2026-02-21 20:37 +0800 样式清理与验证：删除 `apps/web/src/styles.css` 中已废弃的 `workspace-neumorph*` 样式并执行 `pnpm -C apps/web build`，前端构建与类型检查通过。
+- [x] 2026-02-21 20:33 +0800 Web 提示词页底板移除：更新 `apps/web/src/index.html`，在工作区提示词二级视图中移除 `workspace-file-card` 包裹层与重复标题，提示词文件卡片改为直接渲染，去掉额外底板视觉。
+- [x] 2026-02-21 20:33 +0800 验证通过：执行 `pnpm -C apps/web build` 成功，前端构建与类型检查通过。
+- [x] 2026-02-21 20:22 +0800 提示词原文整合：按源码实际来源聚合提示词，输出到 `/mnt/Files/codex/new/all-prompts-raw.md`，覆盖 `codex-rs/core/*.md` 提示词、`protocol/src/prompts/**/*.md`、`core/templates/**/*.md` 以及 `~/.codex/prompts/*.md`。
+- [x] 2026-02-21 20:22 +0800 内嵌提示词补齐：追加 `codex-rs/core/models.json` 中各模型 `base_instructions`、`model_messages.instructions_template` 与 personality 变量原文，避免仅靠外部 md 文件导致遗漏。
+- [x] 2026-02-21 20:19 +0800 真提示词定位完成：确认 Codex 真正内置提示词位于 `codex-rs/core/models.json`（各模型 `base_instructions` / `model_messages.instructions_template`）、`codex-rs/protocol/src/prompts/base_instructions/default.md`、`codex-rs/core/templates/collaboration_mode/{default,plan}.md`，并核对 `core/src/codex.rs` 的提示词装配顺序（base/developer/user instructions）。
+- [x] 2026-02-21 20:19 +0800 本机自定义提示词核对：确认当前用户自定义 prompts 位于 `~/.codex/prompts`，现有 `check-fix.md` 与 `refactor.md` 两份；`core/src/custom_prompts.rs` 显示仅加载该目录下 `.md` 文件并通过 `/prompts:<name>` 展开。
+- [x] 2026-02-21 20:17 +0800 Web 模型下拉去重：更新 `apps/web/src/main.ts`，新增 `buildComposerModelOptions` 与 `resolveComposerModelValue`，按真实模型（canonical）去重并优先保留别名项，确保同一模型只展示一个可选别名。
+- [x] 2026-02-21 20:17 +0800 验证通过：执行 `pnpm -C apps/web build` 成功，前端构建与类型检查通过。
+- [x] 2026-02-21 20:14 +0800 文档检索：已完成对 `/mnt/Files/codex/docs` 的提示词相关文档扫描，定位 `prompts.md`、`tui-chat-composer.md`、`exit-confirmation-prompt-design.md`、`config.md` 等关键文件。
+- [x] 2026-02-21 20:14 +0800 验证通过：执行 `ls/find/rg/sed` 读取与检索命令，确认 docs 目录内未内置完整自定义提示词正文，主要为说明文档与外链指引。
+- [x] 2026-02-21 20:14 +0800 Web 模型显示简化：更新 `apps/web/src/main.ts` 的 `formatComposerModelLabel` 与 `formatModelEntry`，模型下拉与条目仅显示可用模型名（优先 `model.id`），不再展示 `-> alias_of` 映射细节。
+- [x] 2026-02-21 20:14 +0800 验证通过：执行 `pnpm -C apps/web build` 成功，前端构建与类型检查通过。
+- [x] 2026-02-21 20:09 +0800 Web 设置通用化开关落地：在 `apps/web/src/index.html` 的 Display 设置区新增 `feature-prompt-context-introspect` 开关；`apps/web/src/main.ts` 新增 `applyPromptContextIntrospectOverride`，支持在设置页直接切换 `nextai.feature.prompt_context_introspect`（本地持久化 + 即时生效），并触发上下文 token 估算缓存失效重载。
+- [x] 2026-02-21 20:09 +0800 文案与回归补齐：更新 `apps/web/src/locales/{zh-CN,en-US}.ts` 新增开关标签/描述/状态提示；新增 e2e 用例 `apps/web/test/e2e/web-shell-tool-flow.test.ts` 覆盖“设置页切换 prompt context introspect”链路。
+- [x] 2026-02-21 20:09 +0800 验证通过：执行 `pnpm -C apps/web test -- test/e2e/web-shell-tool-flow.test.ts` 与 `pnpm -C apps/web build` 均通过。
+- [x] 2026-02-21 20:05 +0800 Web 模型区文案与交互纠偏：将 `apps/web/src/index.html` 可见标签恢复为“自定义模型配置（可选）”，并恢复按钮文案为“添加”；保持“模型管理”头部已移除。
+- [x] 2026-02-21 20:05 +0800 Web 模型区可编辑性修复：更新 `apps/web/src/main.ts` 的 `providerSupportsCustomModels/syncProviderCustomModelsField/populateProviderCustomModelsRows`，放开模型 ID 行编辑与新增按钮禁用限制，仍按原逻辑写入 `payload.model_aliases`。
+- [x] 2026-02-21 20:05 +0800 验证通过：执行 `pnpm -C apps/web build` 成功，前端构建与类型检查通过。
+- [x] 2026-02-21 19:59 +0800 Web 提供商编辑面板模型区简化：更新 `apps/web/src/index.html`，移除“模型管理”头部（管理/添加按钮），将原“自定义模型配置（可选）”改为 `model_aliases（可选）` 单列表输入，并隐藏原别名键值编辑区域。
+- [x] 2026-02-21 19:59 +0800 验证通过：执行 `pnpm -C apps/web build` 成功，前端构建与类型检查通过；`model_aliases` 仍沿用原有保存逻辑（写入 `payload.model_aliases`）。
+- [x] 2026-02-21 19:50 +0800 Web 模型管理文案修正：将 `apps/web/src/locales/zh-CN.ts` 的 `models.apiKeyMasked` 从“已脱敏”改为“已隐藏”，与界面展示语义一致。
+- [x] 2026-02-21 19:50 +0800 验证通过：执行 `pnpm -C apps/web build` 成功，前端编译与静态资源生成正常。
+- [x] 2026-02-21 19:48 +0800 Web 会话列表刷新闪动优化：移除 `apps/web/src/styles.css` 中 `.chat-list-item` 的 `list-in` 入场动画，并在 `apps/web/src/main.ts` 的 `renderChatList` 删除逐项 `animationDelay` 设置，避免刷新后整列会话再次触发入场动效造成“闪一下”观感。
+- [x] 2026-02-21 19:48 +0800 验证通过：执行 `pnpm -C apps/web build` 成功，TypeScript 编译与静态资源产物生成正常。
 - [x] 2026-02-21 16:25 +0800 阶段 4/5 SystemPrompt 收敛落地：新增 `apps/gateway/internal/service/systemprompt/{service,path_policy}.go` 与 `apps/gateway/internal/app/server_systemprompt_service.go`，将系统层构建、token 估算、路径规范化与 workspace root 解析下沉到 `systemprompt` service；`server_admin.go` 的 `buildSystemLayers`、`prependSystemLayers`、`summarizeLayerPreview`、`estimatePromptTokenCount` 改为委托 service。
 - [x] 2026-02-21 16:25 +0800 阶段 4/5 治理护栏与回归验证：新增 `apps/gateway/internal/app/architecture_guard_test.go`，限制已服务化 handler 直接访问 `store/channels/tools`；新增 `apps/gateway/internal/service/systemprompt/service_test.go` 覆盖 layer 构建与路径规范；执行 `cd apps/gateway && go test ./internal/app ./internal/service/systemprompt && go test ./...` 全部通过。
 - [x] 2026-02-21 16:21 +0800 阶段 3 Ports/Adapters 落地：新增 `apps/gateway/internal/service/ports/{agent,channel,state_store}.go` 与 `apps/gateway/internal/service/adapters/{agent_runtime,channel_resolver,repo_state_store}.go`，抽象 `StateStore/AgentRunner/ToolRuntime/ErrorMapper/ChannelResolver` 端口；`agent/cron/model/workspace` service 依赖统一切换到 ports；`apps/gateway/internal/app/server.go` 新增 `stateStore` 组合根注入，`server_*_service.go` wiring 改为通过 adapters 组装。

@@ -373,6 +373,333 @@ describe("web e2e: /shell command sends biz_params.tool", () => {
     expect(processCalled).toBe(false);
   });
 
+  it("可在设置中切换 prompt context introspect 开关", async () => {
+    let systemLayersRequested = 0;
+    let workspacePromptFileReads = 0;
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const rawURL = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const url = new URL(rawURL);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.pathname === "/runtime-config" && method === "GET") {
+        return jsonResponse({
+          features: {
+            prompt_templates: false,
+            prompt_context_introspect: false,
+          },
+        });
+      }
+
+      if (url.pathname === "/models/catalog" && method === "GET") {
+        return jsonResponse({
+          providers: [],
+          provider_types: [],
+          defaults: {},
+          active_llm: {
+            provider_id: "",
+            model: "",
+          },
+        });
+      }
+
+      if (url.pathname === "/chats" && method === "GET") {
+        return jsonResponse([]);
+      }
+
+      if (url.pathname === "/agent/system-layers" && method === "GET") {
+        systemLayersRequested += 1;
+        return jsonResponse({
+          version: "v1",
+          layers: [],
+          estimated_tokens_total: 123,
+        });
+      }
+
+      if (url.pathname.startsWith("/workspace/files/") && method === "GET") {
+        workspacePromptFileReads += 1;
+        return jsonResponse({ content: "" });
+      }
+
+      throw new Error(`unexpected request: ${method} ${url.pathname}`);
+    }) as typeof globalThis.fetch;
+
+    await import("../../src/main.ts");
+
+    await waitFor(() => workspacePromptFileReads >= 2, 4000);
+
+    const toggle = document.getElementById("feature-prompt-context-introspect") as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event("change", { bubbles: true }));
+
+    await waitFor(() => window.localStorage.getItem("nextai.feature.prompt_context_introspect") === "true", 4000);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    toggle.checked = false;
+    toggle.dispatchEvent(new Event("change", { bubbles: true }));
+    await waitFor(() => window.localStorage.getItem("nextai.feature.prompt_context_introspect") === "false", 4000);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event("change", { bubbles: true }));
+    await waitFor(() => window.localStorage.getItem("nextai.feature.prompt_context_introspect") === "true", 4000);
+    await waitFor(() => systemLayersRequested > 0, 4000);
+    expect(toggle.checked).toBe(true);
+  });
+
+  it("聊天区 Codex 提示词开关切换后，请求会携带对应 biz_params.prompt_mode", async () => {
+    let processCalls = 0;
+    const capturedModes: string[] = [];
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const rawURL = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const url = new URL(rawURL);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.pathname === "/models/catalog" && method === "GET") {
+        return jsonResponse({
+          providers: [],
+          provider_types: [],
+          defaults: {},
+          active_llm: {
+            provider_id: "",
+            model: "",
+          },
+        });
+      }
+
+      if (url.pathname === "/chats" && method === "GET") {
+        return jsonResponse([]);
+      }
+
+      if (url.pathname === "/agent/process" && method === "POST") {
+        processCalls += 1;
+        const payload = JSON.parse(String(init?.body ?? "{}")) as {
+          biz_params?: {
+            prompt_mode?: string;
+          };
+        };
+        capturedModes.push(payload.biz_params?.prompt_mode ?? "");
+        const sse = [
+          `data: ${JSON.stringify({ type: "assistant_delta", step: 1, delta: "ok" })}`,
+          `data: ${JSON.stringify({ type: "completed", step: 1, reply: "ok" })}`,
+          "data: [DONE]",
+          "",
+        ].join("\n\n");
+        return new Response(sse, {
+          status: 200,
+          headers: {
+            "content-type": "text/event-stream",
+          },
+        });
+      }
+
+      throw new Error(`unexpected request: ${method} ${url.pathname}`);
+    }) as typeof globalThis.fetch;
+
+    await import("../../src/main.ts");
+
+    const promptModeToggle = document.getElementById("chat-prompt-mode-toggle") as HTMLInputElement;
+    const messageInput = document.getElementById("message-input") as HTMLTextAreaElement;
+    expect(promptModeToggle.checked).toBe(false);
+
+    messageInput.value = "first";
+    messageInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await waitFor(() => processCalls >= 1, 4000);
+    expect(capturedModes[0]).toBe("default");
+
+    promptModeToggle.checked = true;
+    promptModeToggle.dispatchEvent(new Event("change", { bubbles: true }));
+
+    messageInput.value = "second";
+    messageInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await waitFor(() => processCalls >= 2, 4000);
+    expect(capturedModes[1]).toBe("codex");
+
+    promptModeToggle.checked = false;
+    promptModeToggle.dispatchEvent(new Event("change", { bubbles: true }));
+
+    messageInput.value = "third";
+    messageInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await waitFor(() => processCalls >= 3, 4000);
+    expect(capturedModes[2]).toBe("default");
+  });
+
+  it("会话间 prompt_mode 状态隔离：A=codex，B=default", async () => {
+    let processCalls = 0;
+    const captured: Array<{ sessionID: string; promptMode: string }> = [];
+    const chats = [
+      {
+        id: "chat-codex",
+        name: "Codex Chat",
+        session_id: "session-codex",
+        user_id: "demo-user",
+        channel: "console",
+        created_at: "2026-02-17T12:00:00Z",
+        updated_at: "2026-02-17T12:00:20Z",
+        meta: { prompt_mode: "codex" },
+      },
+      {
+        id: "chat-default",
+        name: "Default Chat",
+        session_id: "session-default",
+        user_id: "demo-user",
+        channel: "console",
+        created_at: "2026-02-17T12:00:01Z",
+        updated_at: "2026-02-17T12:00:10Z",
+        meta: { prompt_mode: "default" },
+      },
+    ];
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const rawURL = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const url = new URL(rawURL);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.pathname === "/models/catalog" && method === "GET") {
+        return jsonResponse({
+          providers: [],
+          provider_types: [],
+          defaults: {},
+          active_llm: {
+            provider_id: "",
+            model: "",
+          },
+        });
+      }
+
+      if (url.pathname === "/chats" && method === "GET") {
+        return jsonResponse(chats);
+      }
+
+      if ((url.pathname === "/chats/chat-codex" || url.pathname === "/chats/chat-default") && method === "GET") {
+        return jsonResponse({ messages: [] });
+      }
+
+      if (url.pathname === "/agent/process" && method === "POST") {
+        processCalls += 1;
+        const payload = JSON.parse(String(init?.body ?? "{}")) as {
+          session_id?: string;
+          biz_params?: {
+            prompt_mode?: string;
+          };
+        };
+        captured.push({
+          sessionID: payload.session_id ?? "",
+          promptMode: payload.biz_params?.prompt_mode ?? "",
+        });
+        const sse = [
+          `data: ${JSON.stringify({ type: "assistant_delta", step: 1, delta: "ok" })}`,
+          `data: ${JSON.stringify({ type: "completed", step: 1, reply: "ok" })}`,
+          "data: [DONE]",
+          "",
+        ].join("\n\n");
+        return new Response(sse, {
+          status: 200,
+          headers: {
+            "content-type": "text/event-stream",
+          },
+        });
+      }
+
+      throw new Error(`unexpected request: ${method} ${url.pathname}`);
+    }) as typeof globalThis.fetch;
+
+    await import("../../src/main.ts");
+
+    const promptModeToggle = document.getElementById("chat-prompt-mode-toggle") as HTMLInputElement;
+    const messageInput = document.getElementById("message-input") as HTMLTextAreaElement;
+
+    await waitFor(() => document.querySelector<HTMLButtonElement>('#chat-list .chat-item-btn[data-chat-id="chat-codex"]') !== null, 4000);
+    expect(promptModeToggle.checked).toBe(true);
+
+    messageInput.value = "for codex";
+    messageInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await waitFor(() => processCalls >= 1, 4000);
+    expect(captured[0]).toEqual({ sessionID: "session-codex", promptMode: "codex" });
+
+    const defaultChatButton = document.querySelector<HTMLButtonElement>('#chat-list .chat-item-btn[data-chat-id="chat-default"]');
+    expect(defaultChatButton).not.toBeNull();
+    defaultChatButton?.click();
+    await waitFor(() => promptModeToggle.checked === false, 4000);
+
+    messageInput.value = "for default";
+    messageInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await waitFor(() => processCalls >= 2, 4000);
+    expect(captured[1]).toEqual({ sessionID: "session-default", promptMode: "default" });
+  });
+
+  it("新会话默认 prompt_mode=default", async () => {
+    let processCalls = 0;
+    const capturedModes: string[] = [];
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const rawURL = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const url = new URL(rawURL);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.pathname === "/models/catalog" && method === "GET") {
+        return jsonResponse({
+          providers: [],
+          provider_types: [],
+          defaults: {},
+          active_llm: {
+            provider_id: "",
+            model: "",
+          },
+        });
+      }
+
+      if (url.pathname === "/chats" && method === "GET") {
+        return jsonResponse([]);
+      }
+
+      if (url.pathname === "/agent/process" && method === "POST") {
+        processCalls += 1;
+        const payload = JSON.parse(String(init?.body ?? "{}")) as {
+          biz_params?: {
+            prompt_mode?: string;
+          };
+        };
+        capturedModes.push(payload.biz_params?.prompt_mode ?? "");
+        const sse = [
+          `data: ${JSON.stringify({ type: "assistant_delta", step: 1, delta: "ok" })}`,
+          `data: ${JSON.stringify({ type: "completed", step: 1, reply: "ok" })}`,
+          "data: [DONE]",
+          "",
+        ].join("\n\n");
+        return new Response(sse, {
+          status: 200,
+          headers: {
+            "content-type": "text/event-stream",
+          },
+        });
+      }
+
+      throw new Error(`unexpected request: ${method} ${url.pathname}`);
+    }) as typeof globalThis.fetch;
+
+    await import("../../src/main.ts");
+
+    const promptModeToggle = document.getElementById("chat-prompt-mode-toggle") as HTMLInputElement;
+    const newChatButton = document.getElementById("new-chat") as HTMLButtonElement;
+    const messageInput = document.getElementById("message-input") as HTMLTextAreaElement;
+
+    promptModeToggle.checked = true;
+    promptModeToggle.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(promptModeToggle.checked).toBe(true);
+
+    newChatButton.click();
+    expect(promptModeToggle.checked).toBe(false);
+
+    messageInput.value = "for new chat";
+    messageInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await waitFor(() => processCalls >= 1, 4000);
+    expect(capturedModes[0]).toBe("default");
+  });
+
   it("按输出顺序渲染：文本和工具调用交错时保持时间线顺序", async () => {
     let processCalled = false;
     let capturedCommand = "";
@@ -1964,6 +2291,197 @@ describe("web e2e: /shell command sends biz_params.tool", () => {
 
     await waitFor(() => workspaceFileSaved, 4000);
     expect(savedContent).toBe(newContent);
+  });
+
+  it("工作区应新增 codex 提示词卡片并支持文件夹层层展开", async () => {
+    const codexFilePaths = [
+      "prompts/codex/codex-rs/core/prompt.md",
+      "prompts/codex/codex-rs/core/templates/collaboration_mode/default.md",
+      "prompts/codex/user-codex/prompts/check-fix.md",
+    ];
+    const openFilePath = codexFilePaths[0];
+    let codexFileLoaded = false;
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const rawURL = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const url = new URL(rawURL);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.pathname === "/models/catalog" && method === "GET") {
+        return jsonResponse({
+          providers: [],
+          provider_types: [],
+          defaults: {},
+          active_llm: {
+            provider_id: "",
+            model: "",
+          },
+        });
+      }
+
+      if (url.pathname === "/chats" && method === "GET") {
+        return jsonResponse([]);
+      }
+
+      if (url.pathname === "/workspace/files" && method === "GET") {
+        return jsonResponse({
+          files: codexFilePaths.map((path) => ({ path, kind: "config", size: path.length })),
+        });
+      }
+
+      if (url.pathname === `/workspace/files/${encodeURIComponent(openFilePath)}` && method === "GET") {
+        codexFileLoaded = true;
+        return jsonResponse({ content: "# codex prompt file" });
+      }
+
+      if (url.pathname.startsWith("/workspace/files/") && method === "GET") {
+        return jsonResponse({ content: "" });
+      }
+
+      throw new Error(`unexpected request: ${method} ${url.pathname}`);
+    }) as typeof globalThis.fetch;
+
+    await import("../../src/main.ts");
+
+    const settingsToggleButton = document.getElementById("settings-toggle") as HTMLButtonElement | null;
+    expect(settingsToggleButton).not.toBeNull();
+    settingsToggleButton?.click();
+
+    const workspaceSectionButton = document.querySelector<HTMLButtonElement>('button[data-settings-section="workspace"]');
+    expect(workspaceSectionButton).not.toBeNull();
+    workspaceSectionButton?.click();
+
+    await waitFor(() => {
+      const button = document.querySelector<HTMLButtonElement>('button[data-workspace-action="open-codex"]');
+      return Boolean(button && (button.textContent ?? "").includes("3"));
+    }, 4000);
+    const openCodexButton = document.querySelector<HTMLButtonElement>('button[data-workspace-action="open-codex"]');
+    expect(openCodexButton).not.toBeNull();
+    expect(openCodexButton?.textContent ?? "").toContain("3");
+    openCodexButton?.click();
+
+    await waitFor(() => document.getElementById("workspace-level2-codex-view")?.hasAttribute("hidden") === false, 4000);
+    await waitFor(() => document.querySelector('button[data-workspace-folder-toggle="codex-rs"]') !== null, 4000);
+
+    const rootFolderToggle = document.querySelector<HTMLButtonElement>('button[data-workspace-folder-toggle="codex-rs"]');
+    expect(rootFolderToggle).not.toBeNull();
+    expect(rootFolderToggle?.getAttribute("aria-expanded")).toBe("true");
+
+    const coreFolderToggle = document.querySelector<HTMLButtonElement>('button[data-workspace-folder-toggle="codex-rs/core"]');
+    expect(coreFolderToggle).not.toBeNull();
+    expect(coreFolderToggle?.getAttribute("aria-expanded")).toBe("false");
+    coreFolderToggle?.click();
+
+    await waitFor(
+      () => document.querySelector<HTMLButtonElement>('button[data-workspace-folder-toggle="codex-rs/core/templates"]') !== null,
+      4000,
+    );
+    const templatesFolderToggle = document.querySelector<HTMLButtonElement>('button[data-workspace-folder-toggle="codex-rs/core/templates"]');
+    expect(templatesFolderToggle).not.toBeNull();
+    expect(templatesFolderToggle?.getAttribute("aria-expanded")).toBe("false");
+
+    const openFileButton = document.querySelector<HTMLButtonElement>(`button[data-workspace-open="${openFilePath}"]`);
+    expect(openFileButton).not.toBeNull();
+    openFileButton?.click();
+    await waitFor(() => codexFileLoaded, 4000);
+  });
+
+  it("工作区卡片应支持启用和禁用", async () => {
+    const configPath = "config/channels.json";
+    const promptPath = "prompts/ai-tools.md";
+    const codexPath = "prompts/codex/user-codex/prompts/check-fix.md";
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const rawURL = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const url = new URL(rawURL);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.pathname === "/models/catalog" && method === "GET") {
+        return jsonResponse({
+          providers: [],
+          provider_types: [],
+          defaults: {},
+          active_llm: {
+            provider_id: "",
+            model: "",
+          },
+        });
+      }
+
+      if (url.pathname === "/chats" && method === "GET") {
+        return jsonResponse([]);
+      }
+
+      if (url.pathname === "/workspace/files" && method === "GET") {
+        return jsonResponse({
+          files: [
+            { path: configPath, kind: "config", size: 128 },
+            { path: promptPath, kind: "config", size: 256 },
+            { path: codexPath, kind: "config", size: 512 },
+          ],
+        });
+      }
+
+      throw new Error(`unexpected request: ${method} ${url.pathname}`);
+    }) as typeof globalThis.fetch;
+
+    await import("../../src/main.ts");
+
+    const settingsToggleButton = document.getElementById("settings-toggle") as HTMLButtonElement | null;
+    expect(settingsToggleButton).not.toBeNull();
+    settingsToggleButton?.click();
+
+    const workspaceSectionButton = document.querySelector<HTMLButtonElement>('button[data-settings-section="workspace"]');
+    expect(workspaceSectionButton).not.toBeNull();
+    workspaceSectionButton?.click();
+
+    await waitFor(() => document.querySelector<HTMLButtonElement>('button[data-workspace-action="open-config"]') !== null, 4000);
+
+    const disableButton = document.querySelector<HTMLButtonElement>('button[data-workspace-toggle-card="config"]');
+    expect(disableButton).not.toBeNull();
+    expect(disableButton?.textContent ?? "").toContain("禁用");
+    disableButton?.click();
+
+    await waitFor(() => {
+      const openConfigButton = document.querySelector<HTMLButtonElement>('button[data-workspace-action="open-config"]');
+      return openConfigButton?.disabled === true;
+    }, 4000);
+    await waitFor(() => (document.getElementById("status-line")?.textContent ?? "").includes("已禁用卡片"), 4000);
+
+    const persistedAfterDisable = window.localStorage.getItem("nextai.web.chat.settings");
+    expect(persistedAfterDisable).not.toBeNull();
+    const parsedAfterDisable = JSON.parse(String(persistedAfterDisable)) as {
+      workspaceCardEnabled?: { config?: boolean };
+    };
+    expect(parsedAfterDisable.workspaceCardEnabled?.config).toBe(false);
+
+    const disabledOpenConfigButton = document.querySelector<HTMLButtonElement>('button[data-workspace-action="open-config"]');
+    disabledOpenConfigButton?.click();
+    expect(document.getElementById("workspace-level2-config-view")?.hasAttribute("hidden")).toBe(true);
+
+    const enableButton = document.querySelector<HTMLButtonElement>('button[data-workspace-toggle-card="config"]');
+    expect(enableButton).not.toBeNull();
+    expect(enableButton?.textContent ?? "").toContain("启用");
+    enableButton?.click();
+
+    await waitFor(() => {
+      const openConfigButton = document.querySelector<HTMLButtonElement>('button[data-workspace-action="open-config"]');
+      return openConfigButton?.disabled === false;
+    }, 4000);
+    await waitFor(() => {
+      const disableAgainButton = document.querySelector<HTMLButtonElement>('button[data-workspace-toggle-card="config"]');
+      return (disableAgainButton?.textContent ?? "").includes("禁用");
+    }, 4000);
+    const persistedAfterEnable = window.localStorage.getItem("nextai.web.chat.settings");
+    expect(persistedAfterEnable).not.toBeNull();
+    const parsedAfterEnable = JSON.parse(String(persistedAfterEnable)) as {
+      workspaceCardEnabled?: { config?: boolean };
+    };
+    expect(parsedAfterEnable.workspaceCardEnabled?.config).toBe(true);
+
+    const enabledOpenConfigButton = document.querySelector<HTMLButtonElement>('button[data-workspace-action="open-config"]');
+    enabledOpenConfigButton?.click();
+    await waitFor(() => document.getElementById("workspace-level2-config-view")?.hasAttribute("hidden") === false, 4000);
   });
 
   it("keeps settings popover open when closing workspace editor modal", async () => {

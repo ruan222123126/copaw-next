@@ -11,7 +11,9 @@ type TabKey = "chat" | "cron";
 type SettingsSectionKey = "connection" | "identity" | "display" | "models" | "channels" | "workspace";
 type ModelsSettingsLevel = "list" | "edit";
 type ChannelsSettingsLevel = "list" | "edit";
-type WorkspaceSettingsLevel = "list" | "config" | "prompt";
+type WorkspaceSettingsLevel = "list" | "config" | "prompt" | "codex";
+type WorkspaceCardKey = "config" | "prompt" | "codex";
+type PromptMode = "default" | "codex";
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 type ProviderKVKind = "headers" | "aliases";
 type WorkspaceEditorMode = "json" | "text";
@@ -99,6 +101,12 @@ interface ProviderTypeInfo {
   display_name: string;
 }
 
+interface ComposerModelOption {
+  value: string;
+  canonical: string;
+  label: string;
+}
+
 interface ModelSlotConfig {
   provider_id: string;
   model: string;
@@ -119,10 +127,23 @@ interface DeleteResult {
   deleted: boolean;
 }
 
+interface PersistedSettings {
+  apiBase?: unknown;
+  apiKey?: unknown;
+  workspaceCardEnabled?: unknown;
+}
+
 interface WorkspaceFileInfo {
   path: string;
   kind: "config" | "skill";
   size: number | null;
+}
+
+interface WorkspaceCodexTreeNode {
+  name: string;
+  path: string;
+  folders: WorkspaceCodexTreeNode[];
+  files: WorkspaceFileInfo[];
 }
 
 interface WorkspaceTextPayload {
@@ -368,11 +389,19 @@ const PROMPT_TEMPLATE_PREFIX = "/prompts:";
 const SYSTEM_PROMPT_LAYER_ENDPOINT = "/agent/system-layers";
 const SYSTEM_PROMPT_WORKSPACE_FALLBACK_PATHS = ["docs/AI/AGENTS.md", "docs/AI/ai-tools.md"] as const;
 const SYSTEM_PROMPT_WORKSPACE_PATH_SET = new Set(SYSTEM_PROMPT_WORKSPACE_FALLBACK_PATHS.map((path) => path.toLowerCase()));
+const WORKSPACE_CODEX_PREFIX = "prompts/codex/";
+const WORKSPACE_CARD_KEYS: WorkspaceCardKey[] = ["config", "prompt", "codex"];
+const DEFAULT_WORKSPACE_CARD_ENABLED: Record<WorkspaceCardKey, boolean> = {
+  config: true,
+  prompt: true,
+  codex: true,
+};
 const PROMPT_TEMPLATE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const PROMPT_TEMPLATE_ARG_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const PROMPT_TEMPLATE_PLACEHOLDER_PATTERN = /\$([A-Za-z_][A-Za-z0-9_]*)/g;
 const FEATURE_FLAG_PROMPT_TEMPLATES = "nextai.feature.prompt_templates";
 const FEATURE_FLAG_PROMPT_CONTEXT_INTROSPECT = "nextai.feature.prompt_context_introspect";
+const PROMPT_MODE_META_KEY = "prompt_mode";
 const SETTINGS_KEY = "nextai.web.chat.settings";
 const LOCALE_KEY = "nextai.web.locale";
 const BUILTIN_PROVIDER_IDS = new Set(["openai"]);
@@ -399,6 +428,7 @@ const runtimeFlags: Required<RuntimeConfigFeatureFlags> = {
 const apiBaseInput = mustElement<HTMLInputElement>("api-base");
 const apiKeyInput = mustElement<HTMLInputElement>("api-key");
 const localeSelect = mustElement<HTMLSelectElement>("locale-select");
+const promptContextIntrospectInput = mustElement<HTMLInputElement>("feature-prompt-context-introspect");
 const reloadChatsButton = mustElement<HTMLButtonElement>("reload-chats");
 const settingsToggleButton = mustElement<HTMLButtonElement>("settings-toggle");
 const settingsPopover = mustElement<HTMLElement>("settings-popover");
@@ -423,6 +453,7 @@ const newChatButton = mustElement<HTMLButtonElement>("new-chat");
 const chatList = mustElement<HTMLUListElement>("chat-list");
 const chatTitle = mustElement<HTMLElement>("chat-title");
 const chatSession = mustElement<HTMLElement>("chat-session");
+const chatPromptModeToggle = mustElement<HTMLInputElement>("chat-prompt-mode-toggle");
 const searchChatInput = mustElement<HTMLInputElement>("search-chat-input");
 const searchChatResults = mustElement<HTMLUListElement>("search-chat-results");
 const messageList = mustElement<HTMLUListElement>("message-list");
@@ -477,8 +508,10 @@ const workspaceEntryList = mustElement<HTMLUListElement>("workspace-entry-list")
 const workspaceLevel1View = mustElement<HTMLElement>("workspace-level1-view");
 const workspaceLevel2ConfigView = mustElement<HTMLElement>("workspace-level2-config-view");
 const workspaceLevel2PromptView = mustElement<HTMLElement>("workspace-level2-prompt-view");
+const workspaceLevel2CodexView = mustElement<HTMLElement>("workspace-level2-codex-view");
 const workspaceFilesBody = mustElement<HTMLUListElement>("workspace-files-body");
 const workspacePromptsBody = mustElement<HTMLUListElement>("workspace-prompts-body");
+const workspaceCodexTreeBody = mustElement<HTMLUListElement>("workspace-codex-tree-body");
 const workspaceCreateFileForm = mustElement<HTMLFormElement>("workspace-create-file-form");
 const workspaceNewPathInput = mustElement<HTMLInputElement>("workspace-new-path");
 const workspaceEditorModal = mustElement<HTMLElement>("workspace-editor-modal");
@@ -549,6 +582,7 @@ const state = {
   chatSearchQuery: "",
   activeChatId: null as string | null,
   activeSessionId: newSessionID(),
+  activePromptMode: "default" as PromptMode,
   messages: [] as ViewMessage[],
   messageOutputOrder: 0,
   sending: false,
@@ -561,6 +595,7 @@ const state = {
   modelsSettingsLevel: "list" as ModelsSettingsLevel,
   channelsSettingsLevel: "list" as ChannelsSettingsLevel,
   workspaceSettingsLevel: "list" as WorkspaceSettingsLevel,
+  workspaceCardEnabled: { ...DEFAULT_WORKSPACE_CARD_ENABLED },
   providerAPIKeyVisible: true,
   providerModal: {
     open: false,
@@ -568,6 +603,7 @@ const state = {
     editingProviderID: "",
   },
   workspaceFiles: [] as WorkspaceFileInfo[],
+  workspaceCodexExpandedFolders: new Set<string>(),
   qqChannelConfig: defaultQQChannelConfig(),
   qqChannelAvailable: true,
   activeWorkspacePath: "",
@@ -728,6 +764,7 @@ function applyRuntimeFeatureOverrides(features: RuntimeConfigFeatureFlags): void
     FEATURE_FLAG_PROMPT_CONTEXT_INTROSPECT,
     runtimePromptContextIntrospect,
   );
+  syncFeatureFlagControls();
 }
 
 async function loadRuntimeConfig(): Promise<void> {
@@ -736,6 +773,25 @@ async function loadRuntimeConfig(): Promise<void> {
     applyRuntimeFeatureOverrides(payload.features ?? {});
   } catch {
     applyRuntimeFeatureOverrides({});
+  }
+}
+
+function syncFeatureFlagControls(): void {
+  promptContextIntrospectInput.checked = runtimeFlags.prompt_context_introspect;
+}
+
+function applyPromptContextIntrospectOverride(enabled: boolean, notify = false): void {
+  runtimeFlags.prompt_context_introspect = enabled;
+  try {
+    window.localStorage.setItem(FEATURE_FLAG_PROMPT_CONTEXT_INTROSPECT, String(enabled));
+  } catch {
+    // ignore localStorage write error
+  }
+  syncFeatureFlagControls();
+  invalidateSystemPromptTokensCacheAndReload();
+  renderComposerTokenEstimate();
+  if (notify) {
+    setStatus(t(enabled ? "status.promptContextIntrospectEnabled" : "status.promptContextIntrospectDisabled"), "info");
   }
 }
 
@@ -1030,6 +1086,10 @@ function bindEvents(): void {
     setStatus(t("status.draftReady"), "info");
   });
 
+  chatPromptModeToggle.addEventListener("change", () => {
+    setActivePromptMode(chatPromptModeToggle.checked ? "codex" : "default", { announce: true });
+  });
+
   searchChatInput.addEventListener("input", () => {
     state.chatSearchQuery = searchChatInput.value.trim();
     renderSearchChatResults();
@@ -1053,6 +1113,9 @@ function bindEvents(): void {
       }),
       "info",
     );
+  });
+  promptContextIntrospectInput.addEventListener("change", () => {
+    applyPromptContextIntrospectOverride(promptContextIntrospectInput.checked, true);
   });
 
   composerForm.addEventListener("submit", async (event) => {
@@ -1211,18 +1274,41 @@ function bindEvents(): void {
     if (!(target instanceof Element)) {
       return;
     }
+    const toggleButton = target.closest<HTMLButtonElement>("button[data-workspace-toggle-card]");
+    if (toggleButton) {
+      const card = toggleButton.dataset.workspaceToggleCard;
+      if (!isWorkspaceCardKey(card)) {
+        return;
+      }
+      setWorkspaceCardEnabled(card, !isWorkspaceCardEnabled(card));
+      return;
+    }
     const button = target.closest<HTMLButtonElement>("button[data-workspace-action]");
     if (!button) {
       return;
     }
     const action = button.dataset.workspaceAction;
     if (action === "open-config") {
+      if (!ensureWorkspaceCardEnabled("config")) {
+        return;
+      }
       setWorkspaceSettingsLevel("config");
       renderWorkspacePanel();
       return;
     }
     if (action === "open-prompt") {
+      if (!ensureWorkspaceCardEnabled("prompt")) {
+        return;
+      }
       setWorkspaceSettingsLevel("prompt");
+      renderWorkspacePanel();
+      return;
+    }
+    if (action === "open-codex") {
+      if (!ensureWorkspaceCardEnabled("codex")) {
+        return;
+      }
+      setWorkspaceSettingsLevel("codex");
       renderWorkspacePanel();
       return;
     }
@@ -1308,6 +1394,20 @@ function bindEvents(): void {
     void handleWorkspaceFilesClick(event);
   });
   workspacePromptsBody.addEventListener("click", (event) => {
+    void handleWorkspaceFilesClick(event);
+  });
+  workspaceCodexTreeBody.addEventListener("click", (event) => {
+    const target = event.target;
+    if (target instanceof Element) {
+      const folderToggle = target.closest<HTMLButtonElement>("button[data-workspace-folder-toggle]");
+      if (folderToggle) {
+        const folderPath = folderToggle.dataset.workspaceFolderToggle ?? "";
+        if (folderPath !== "") {
+          toggleWorkspaceCodexFolder(folderPath);
+        }
+        return;
+      }
+    }
     void handleWorkspaceFilesClick(event);
   });
   workspaceEditorForm.addEventListener("submit", async (event) => {
@@ -2194,13 +2294,14 @@ function restoreSettings(): void {
   const raw = localStorage.getItem(SETTINGS_KEY);
   if (raw) {
     try {
-      const parsed = JSON.parse(raw) as Partial<typeof state>;
+      const parsed = JSON.parse(raw) as PersistedSettings;
       if (typeof parsed.apiBase === "string" && parsed.apiBase.trim() !== "") {
         state.apiBase = parsed.apiBase.trim();
       }
       if (typeof parsed.apiKey === "string") {
         state.apiKey = parsed.apiKey.trim();
       }
+      state.workspaceCardEnabled = parseWorkspaceCardEnabled(parsed.workspaceCardEnabled);
     } catch {
       localStorage.removeItem(SETTINGS_KEY);
     }
@@ -2221,6 +2322,7 @@ function syncControlState(): void {
     JSON.stringify({
       apiBase: state.apiBase,
       apiKey: state.apiKey,
+      workspaceCardEnabled: state.workspaceCardEnabled,
     }),
   );
 }
@@ -2268,6 +2370,7 @@ async function reloadChats(options: { includeQQHistory?: boolean } = {}): Promis
     let activeChatCleared = false;
     if (state.activeChatId && !state.chats.some((chat) => chat.id === state.activeChatId)) {
       state.activeChatId = null;
+      state.activePromptMode = "default";
       activeChatCleared = true;
     }
 
@@ -2292,6 +2395,7 @@ async function openChat(chatID: string): Promise<void> {
   const requestSerial = ++openChatRequestSerial;
   state.activeChatId = chat.id;
   state.activeSessionId = chat.session_id;
+  state.activePromptMode = resolveChatPromptMode(chat.meta);
   renderChatHeader();
   syncActiveChatSelections();
 
@@ -2363,6 +2467,7 @@ function startDraftSession(): void {
   openChatRequestSerial += 1;
   state.activeChatId = null;
   state.activeSessionId = newSessionID();
+  state.activePromptMode = "default";
   state.messages = [];
   renderChatHeader();
   renderChatList();
@@ -2617,9 +2722,7 @@ async function streamReply(
     channel: WEB_CHAT_CHANNEL,
     stream: true,
   };
-  if (bizParams && Object.keys(bizParams).length > 0) {
-    payload.biz_params = bizParams;
-  }
+  payload.biz_params = mergePromptModeBizParams(bizParams, state.activePromptMode);
 
   const headers = new Headers({
     "content-type": "application/json",
@@ -2764,10 +2867,9 @@ function renderChatList(): void {
     return;
   }
 
-  state.chats.forEach((chat, index) => {
+  state.chats.forEach((chat) => {
     const li = document.createElement("li");
     li.className = "chat-list-item";
-    li.style.animationDelay = `${Math.min(index * 24, 180)}ms`;
 
     const actions = document.createElement("div");
     actions.className = "chat-item-actions";
@@ -2897,12 +2999,54 @@ function resolveChatCronJobID(meta: Record<string, unknown> | undefined): string
   return "";
 }
 
+function normalizePromptMode(raw: unknown): PromptMode {
+  if (typeof raw !== "string") {
+    return "default";
+  }
+  return raw.trim().toLowerCase() === "codex" ? "codex" : "default";
+}
+
+function resolveChatPromptMode(meta: Record<string, unknown> | undefined): PromptMode {
+  return normalizePromptMode(meta?.[PROMPT_MODE_META_KEY]);
+}
+
+function mergePromptModeBizParams(
+  bizParams: Record<string, unknown> | undefined,
+  promptMode: PromptMode,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = bizParams ? { ...bizParams } : {};
+  merged[PROMPT_MODE_META_KEY] = promptMode;
+  return merged;
+}
+
+function setActivePromptMode(nextMode: PromptMode, options: { announce?: boolean } = {}): void {
+  const normalized = nextMode === "codex" ? "codex" : "default";
+  const changed = state.activePromptMode !== normalized;
+  state.activePromptMode = normalized;
+  const active = state.chats.find((chat) => chat.id === state.activeChatId);
+  if (active) {
+    if (!active.meta) {
+      active.meta = {};
+    }
+    active.meta[PROMPT_MODE_META_KEY] = normalized;
+  }
+  renderChatHeader();
+  if (options.announce && changed) {
+    setStatus(t(normalized === "codex" ? "status.promptModeCodexEnabled" : "status.promptModeDefaultEnabled"), "info");
+  }
+}
+
 function renderChatHeader(): void {
   const active = state.chats.find((chat) => chat.id === state.activeChatId);
+  if (active) {
+    state.activePromptMode = resolveChatPromptMode(active.meta);
+  }
   chatTitle.textContent = active ? active.name : t("chat.draftTitle");
   const sessionId = state.activeSessionId;
   chatSession.textContent = sessionId;
   chatSession.title = sessionId;
+  chatPromptModeToggle.checked = state.activePromptMode === "codex";
+  chatPromptModeToggle.setAttribute("aria-checked", chatPromptModeToggle.checked ? "true" : "false");
 }
 
 function syncActiveChatSelections(): void {
@@ -3487,31 +3631,80 @@ function resolveComposerProvider(providers: ProviderInfo[]): ProviderInfo | null
 
 function formatComposerModelLabel(model: ModelInfo): string {
   const modelID = model.id.trim();
+  if (modelID !== "") {
+    return modelID;
+  }
+  return (model.name ?? "").trim();
+}
+
+function resolveComposerModelCanonicalID(model: ModelInfo): string {
+  const modelID = model.id.trim();
+  if (modelID === "") {
+    return "";
+  }
   const aliasOf = (model.alias_of ?? "").trim();
   if (aliasOf !== "" && aliasOf !== modelID) {
-    return `${modelID} -> ${aliasOf}`;
-  }
-  const modelName = (model.name ?? "").trim();
-  if (modelName !== "" && modelName !== modelID) {
-    return `${modelName} (${modelID})`;
+    return aliasOf;
   }
   return modelID;
 }
 
-function resolveComposerModelID(provider: ProviderInfo): string {
+function buildComposerModelOptions(provider: ProviderInfo): ComposerModelOption[] {
+  const optionsByCanonical = new Map<string, ComposerModelOption>();
+  for (const model of provider.models) {
+    const modelID = model.id.trim();
+    if (modelID === "") {
+      continue;
+    }
+    const canonicalID = resolveComposerModelCanonicalID(model) || modelID;
+    const option: ComposerModelOption = {
+      value: modelID,
+      canonical: canonicalID,
+      label: formatComposerModelLabel(model),
+    };
+    const existing = optionsByCanonical.get(canonicalID);
+    if (!existing) {
+      optionsByCanonical.set(canonicalID, option);
+      continue;
+    }
+    const existingIsAlias = existing.value !== existing.canonical;
+    const currentIsAlias = option.value !== option.canonical;
+    if (!existingIsAlias && currentIsAlias) {
+      optionsByCanonical.set(canonicalID, option);
+    }
+  }
+  return Array.from(optionsByCanonical.values());
+}
+
+function resolveComposerModelValue(options: ComposerModelOption[], requestedModelID: string): string {
+  const modelID = requestedModelID.trim();
+  if (modelID === "") {
+    return "";
+  }
+  if (options.some((option) => option.value === modelID)) {
+    return modelID;
+  }
+  const byCanonical = options.find((option) => option.canonical === modelID);
+  return byCanonical?.value ?? "";
+}
+
+function resolveComposerModelID(provider: ProviderInfo, options: ComposerModelOption[]): string {
   const activeModel = state.activeLLM.provider_id === provider.id ? state.activeLLM.model.trim() : "";
-  if (activeModel !== "" && provider.models.some((model) => model.id === activeModel)) {
-    return activeModel;
+  const activeValue = resolveComposerModelValue(options, activeModel);
+  if (activeValue !== "") {
+    return activeValue;
   }
   const selectedModel = composerModelSelect.value.trim();
-  if (selectedModel !== "" && provider.models.some((model) => model.id === selectedModel)) {
-    return selectedModel;
+  const selectedValue = resolveComposerModelValue(options, selectedModel);
+  if (selectedValue !== "") {
+    return selectedValue;
   }
   const defaultModel = (state.modelDefaults[provider.id] ?? "").trim();
-  if (defaultModel !== "" && provider.models.some((model) => model.id === defaultModel)) {
-    return defaultModel;
+  const defaultValue = resolveComposerModelValue(options, defaultModel);
+  if (defaultValue !== "") {
+    return defaultValue;
   }
-  return provider.models[0]?.id?.trim() ?? "";
+  return options[0]?.value ?? "";
 }
 
 function renderComposerModelOptions(provider: ProviderInfo | null): string {
@@ -3524,11 +3717,20 @@ function renderComposerModelOptions(provider: ProviderInfo | null): string {
     return "";
   }
 
-  for (const model of provider.models) {
-    appendSelectOption(composerModelSelect, model.id, formatComposerModelLabel(model));
+  const options = buildComposerModelOptions(provider);
+  if (options.length === 0) {
+    appendSelectOption(composerModelSelect, "", t("models.noModelOption"));
+    composerModelSelect.value = "";
+    composerModelSelect.disabled = true;
+    syncCustomSelect(composerModelSelect);
+    return "";
   }
 
-  const resolvedModelID = resolveComposerModelID(provider);
+  for (const option of options) {
+    appendSelectOption(composerModelSelect, option.value, option.label);
+  }
+
+  const resolvedModelID = resolveComposerModelID(provider, options);
   composerModelSelect.value = resolvedModelID;
   composerModelSelect.disabled = resolvedModelID === "";
   syncCustomSelect(composerModelSelect);
@@ -3714,62 +3916,156 @@ function renderChannelsPanel(): void {
 }
 
 function setWorkspaceSettingsLevel(level: WorkspaceSettingsLevel): void {
-  state.workspaceSettingsLevel = level === "config" || level === "prompt" ? level : "list";
+  state.workspaceSettingsLevel = level === "config" || level === "prompt" || level === "codex" ? level : "list";
   const showList = state.workspaceSettingsLevel === "list";
   workspaceLevel1View.hidden = !showList;
   workspaceLevel2ConfigView.hidden = state.workspaceSettingsLevel !== "config";
   workspaceLevel2PromptView.hidden = state.workspaceSettingsLevel !== "prompt";
+  workspaceLevel2CodexView.hidden = state.workspaceSettingsLevel !== "codex";
   workspaceSettingsSection.classList.toggle("is-level2-active", !showList);
 }
 
-function renderWorkspaceNavigation(configCount: number, promptCount: number): void {
+function parseWorkspaceCardEnabled(raw: unknown): Record<WorkspaceCardKey, boolean> {
+  const next = { ...DEFAULT_WORKSPACE_CARD_ENABLED };
+  if (!raw || typeof raw !== "object") {
+    return next;
+  }
+  const source = raw as Record<string, unknown>;
+  for (const card of WORKSPACE_CARD_KEYS) {
+    if (typeof source[card] === "boolean") {
+      next[card] = source[card] as boolean;
+    }
+  }
+  return next;
+}
+
+function isWorkspaceCardKey(value: string | undefined): value is WorkspaceCardKey {
+  return value === "config" || value === "prompt" || value === "codex";
+}
+
+function isWorkspaceCardEnabled(card: WorkspaceCardKey): boolean {
+  return state.workspaceCardEnabled[card] !== false;
+}
+
+function resolveWorkspaceCardTitle(card: WorkspaceCardKey): string {
+  if (card === "config") {
+    return t("workspace.configCardTitle");
+  }
+  if (card === "prompt") {
+    return t("workspace.promptCardTitle");
+  }
+  return t("workspace.codexCardTitle");
+}
+
+function ensureWorkspaceCardEnabled(card: WorkspaceCardKey): boolean {
+  if (isWorkspaceCardEnabled(card)) {
+    return true;
+  }
+  setStatus(t("status.workspaceCardBlocked", { card: resolveWorkspaceCardTitle(card) }), "info");
+  return false;
+}
+
+function setWorkspaceCardEnabled(card: WorkspaceCardKey, enabled: boolean): void {
+  if (state.workspaceCardEnabled[card] === enabled) {
+    return;
+  }
+  state.workspaceCardEnabled[card] = enabled;
+  if (!enabled && state.workspaceSettingsLevel === card) {
+    setWorkspaceSettingsLevel("list");
+  }
+  syncControlState();
+  renderWorkspacePanel();
+  setStatus(
+    t(enabled ? "status.workspaceCardEnabled" : "status.workspaceCardDisabled", {
+      card: resolveWorkspaceCardTitle(card),
+    }),
+    "info",
+  );
+}
+
+function appendWorkspaceNavigationCard(
+  card: WorkspaceCardKey,
+  action: "open-config" | "open-prompt" | "open-codex",
+  selected: boolean,
+  titleText: string,
+  descText: string,
+  fileCount: number,
+): void {
+  const enabled = isWorkspaceCardEnabled(card);
+  const entry = document.createElement("li");
+  entry.className = "models-provider-card-entry workspace-entry-card-entry";
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "models-provider-card channels-entry-card workspace-entry-card";
+  button.dataset.workspaceAction = action;
+  button.disabled = !enabled;
+  button.setAttribute("aria-disabled", String(!enabled));
+  if (selected) {
+    button.classList.add("is-selected");
+  }
+  if (!enabled) {
+    button.classList.add("is-disabled");
+  }
+  button.setAttribute("aria-pressed", String(selected));
+
+  const title = document.createElement("span");
+  title.className = "models-provider-card-title";
+  title.textContent = titleText;
+
+  const desc = document.createElement("span");
+  desc.className = "models-provider-card-meta";
+  desc.textContent = descText;
+
+  const status = document.createElement("span");
+  status.className = "models-provider-card-meta workspace-entry-card-status";
+  status.textContent = enabled ? t("workspace.cardEnabled") : t("workspace.cardDisabled");
+
+  const countMeta = document.createElement("span");
+  countMeta.className = "models-provider-card-meta";
+  countMeta.textContent = t("workspace.cardFileCount", { count: fileCount });
+
+  button.append(title, desc, status, countMeta);
+  entry.appendChild(button);
+
+  const toggleButton = document.createElement("button");
+  toggleButton.type = "button";
+  toggleButton.className = "secondary-btn workspace-entry-toggle-btn";
+  toggleButton.dataset.workspaceToggleCard = card;
+  toggleButton.setAttribute("aria-pressed", String(enabled));
+  toggleButton.setAttribute("aria-label", `${enabled ? t("workspace.disableCard") : t("workspace.enableCard")} ${titleText}`);
+  toggleButton.textContent = enabled ? t("workspace.disableCard") : t("workspace.enableCard");
+  entry.appendChild(toggleButton);
+
+  workspaceEntryList.appendChild(entry);
+}
+
+function renderWorkspaceNavigation(configCount: number, promptCount: number, codexCount: number): void {
   workspaceEntryList.innerHTML = "";
-
-  const configEntry = document.createElement("li");
-  configEntry.className = "models-provider-card-entry";
-  const configButton = document.createElement("button");
-  configButton.type = "button";
-  configButton.className = "models-provider-card channels-entry-card workspace-entry-card";
-  configButton.dataset.workspaceAction = "open-config";
-  if (state.workspaceSettingsLevel === "config") {
-    configButton.classList.add("is-selected");
-  }
-  configButton.setAttribute("aria-pressed", String(state.workspaceSettingsLevel === "config"));
-  const configTitle = document.createElement("span");
-  configTitle.className = "models-provider-card-title";
-  configTitle.textContent = t("workspace.configCardTitle");
-  const configDesc = document.createElement("span");
-  configDesc.className = "models-provider-card-meta";
-  configDesc.textContent = t("workspace.briefGeneric");
-  const configCountMeta = document.createElement("span");
-  configCountMeta.className = "models-provider-card-meta";
-  configCountMeta.textContent = t("workspace.cardFileCount", { count: configCount });
-  configButton.append(configTitle, configDesc, configCountMeta);
-  configEntry.appendChild(configButton);
-  workspaceEntryList.appendChild(configEntry);
-
-  const promptEntry = document.createElement("li");
-  promptEntry.className = "models-provider-card-entry";
-  const promptButton = document.createElement("button");
-  promptButton.type = "button";
-  promptButton.className = "models-provider-card channels-entry-card workspace-entry-card";
-  promptButton.dataset.workspaceAction = "open-prompt";
-  if (state.workspaceSettingsLevel === "prompt") {
-    promptButton.classList.add("is-selected");
-  }
-  promptButton.setAttribute("aria-pressed", String(state.workspaceSettingsLevel === "prompt"));
-  const promptTitle = document.createElement("span");
-  promptTitle.className = "models-provider-card-title";
-  promptTitle.textContent = t("workspace.promptCardTitle");
-  const promptDesc = document.createElement("span");
-  promptDesc.className = "models-provider-card-meta";
-  promptDesc.textContent = t("workspace.briefAITools");
-  const promptCountMeta = document.createElement("span");
-  promptCountMeta.className = "models-provider-card-meta";
-  promptCountMeta.textContent = t("workspace.cardFileCount", { count: promptCount });
-  promptButton.append(promptTitle, promptDesc, promptCountMeta);
-  promptEntry.appendChild(promptButton);
-  workspaceEntryList.appendChild(promptEntry);
+  appendWorkspaceNavigationCard(
+    "config",
+    "open-config",
+    state.workspaceSettingsLevel === "config",
+    t("workspace.configCardTitle"),
+    t("workspace.briefGeneric"),
+    configCount,
+  );
+  appendWorkspaceNavigationCard(
+    "prompt",
+    "open-prompt",
+    state.workspaceSettingsLevel === "prompt",
+    t("workspace.promptCardTitle"),
+    t("workspace.briefAITools"),
+    promptCount,
+  );
+  appendWorkspaceNavigationCard(
+    "codex",
+    "open-codex",
+    state.workspaceSettingsLevel === "codex",
+    t("workspace.codexCardTitle"),
+    t("workspace.briefCodex"),
+    codexCount,
+  );
 }
 
 function setProviderAPIKeyVisibility(visible: boolean): void {
@@ -3974,12 +4270,12 @@ function resolveOpenAIDuplicateModelAliases(): Record<string, string> {
 
 function providerSupportsCustomModels(providerTypeID: string): boolean {
   const normalized = normalizeProviderTypeValue(providerTypeID);
-  return normalized !== "" && !BUILTIN_PROVIDER_IDS.has(normalized);
+  return normalized !== "";
 }
 
 function syncProviderCustomModelsField(providerTypeID: string): void {
   const enabled = providerSupportsCustomModels(providerTypeID);
-  modelsProviderCustomModelsField.hidden = !enabled;
+  modelsProviderCustomModelsField.hidden = false;
   modelsProviderCustomModelsAddButton.disabled = !enabled;
   for (const input of Array.from(modelsProviderCustomModelsRows.querySelectorAll<HTMLInputElement>("input[data-custom-model-input=\"true\"]"))) {
     input.disabled = !enabled;
@@ -4413,9 +4709,6 @@ function populateProviderAliasRows(provider: ProviderInfo): void {
 
 function populateProviderCustomModelsRows(provider: ProviderInfo): void {
   resetProviderCustomModelsEditor();
-  if (BUILTIN_PROVIDER_IDS.has(provider.id)) {
-    return;
-  }
 
   const customModelIDs = Array.from(collectProviderModelAliases(provider).entries())
     .filter(([alias, target]) => alias === target)
@@ -4691,6 +4984,7 @@ async function refreshWorkspace(options: { silent?: boolean } = {}): Promise<voi
   try {
     const files = await listWorkspaceFiles();
     state.workspaceFiles = files;
+    pruneWorkspaceCodexExpandedFolders(files);
     if (state.activeWorkspacePath !== "" && !files.some((file) => file.path === state.activeWorkspacePath)) {
       clearWorkspaceSelection();
     }
@@ -4711,23 +5005,221 @@ function renderWorkspacePanel(): void {
 }
 
 function renderWorkspaceFiles(): void {
-  const { configFiles, promptFiles } = splitWorkspaceFiles(state.workspaceFiles);
-  renderWorkspaceNavigation(configFiles.length, promptFiles.length);
+  const { configFiles, promptFiles, codexFiles } = splitWorkspaceFiles(state.workspaceFiles);
+  renderWorkspaceNavigation(configFiles.length, promptFiles.length, codexFiles.length);
   renderWorkspaceFileRows(workspaceFilesBody, configFiles, t("workspace.emptyConfig"));
   renderWorkspaceFileRows(workspacePromptsBody, promptFiles, t("workspace.emptyPrompt"));
+  renderWorkspaceCodexTree(workspaceCodexTreeBody, codexFiles, t("workspace.emptyCodex"));
 }
 
-function splitWorkspaceFiles(files: WorkspaceFileInfo[]): { configFiles: WorkspaceFileInfo[]; promptFiles: WorkspaceFileInfo[] } {
+function splitWorkspaceFiles(
+  files: WorkspaceFileInfo[],
+): { configFiles: WorkspaceFileInfo[]; promptFiles: WorkspaceFileInfo[]; codexFiles: WorkspaceFileInfo[] } {
   const configFiles: WorkspaceFileInfo[] = [];
   const promptFiles: WorkspaceFileInfo[] = [];
+  const codexFiles: WorkspaceFileInfo[] = [];
   for (const file of files) {
+    if (isWorkspaceCodexFile(file)) {
+      codexFiles.push(file);
+      continue;
+    }
     if (isWorkspacePromptFile(file)) {
       promptFiles.push(file);
       continue;
     }
     configFiles.push(file);
   }
-  return { configFiles, promptFiles };
+  return { configFiles, promptFiles, codexFiles };
+}
+
+function renderWorkspaceCodexTree(targetBody: HTMLUListElement, files: WorkspaceFileInfo[], emptyText: string): void {
+  targetBody.innerHTML = "";
+  const tree = buildWorkspaceCodexTree(files);
+  if (tree.length === 0) {
+    appendEmptyItem(targetBody, emptyText);
+    return;
+  }
+  for (const node of tree) {
+    appendWorkspaceCodexFolderNode(targetBody, node, 0);
+  }
+}
+
+function buildWorkspaceCodexTree(files: WorkspaceFileInfo[]): WorkspaceCodexTreeNode[] {
+  type MutableNode = {
+    name: string;
+    path: string;
+    folders: Map<string, MutableNode>;
+    files: WorkspaceFileInfo[];
+  };
+  const root: MutableNode = {
+    name: "",
+    path: "",
+    folders: new Map<string, MutableNode>(),
+    files: [],
+  };
+
+  for (const file of files) {
+    if (!isWorkspaceCodexFile(file)) {
+      continue;
+    }
+    const normalizedPath = normalizeWorkspaceInputPath(file.path);
+    const relativePath = normalizedPath.slice(WORKSPACE_CODEX_PREFIX.length);
+    const parts = relativePath.split("/").filter((part) => part !== "");
+    if (parts.length === 0) {
+      continue;
+    }
+    const fileName = parts.pop() ?? "";
+    if (fileName === "") {
+      continue;
+    }
+    let cursor = root;
+    let folderPath = "";
+    for (const part of parts) {
+      folderPath = folderPath === "" ? part : `${folderPath}/${part}`;
+      let next = cursor.folders.get(part);
+      if (!next) {
+        next = {
+          name: part,
+          path: folderPath,
+          folders: new Map<string, MutableNode>(),
+          files: [],
+        };
+        cursor.folders.set(part, next);
+      }
+      cursor = next;
+    }
+    cursor.files.push(file);
+  }
+
+  const freezeTree = (node: MutableNode): WorkspaceCodexTreeNode => {
+    const folders = Array.from(node.folders.values())
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((child) => freezeTree(child));
+    const sortedFiles = [...node.files].sort((a, b) => a.path.localeCompare(b.path));
+    return {
+      name: node.name,
+      path: node.path,
+      folders,
+      files: sortedFiles,
+    };
+  };
+
+  return Array.from(root.folders.values())
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((node) => freezeTree(node));
+}
+
+function appendWorkspaceCodexFolderNode(targetBody: HTMLUListElement, node: WorkspaceCodexTreeNode, depth: number): void {
+  const entry = document.createElement("li");
+  entry.className = "workspace-codex-tree-node workspace-codex-tree-folder";
+
+  const toggleButton = document.createElement("button");
+  toggleButton.type = "button";
+  toggleButton.className = "workspace-codex-folder-toggle";
+  toggleButton.dataset.workspaceFolderToggle = node.path;
+  toggleButton.dataset.workspaceFolderPath = node.path;
+  toggleButton.dataset.workspaceFolderDepth = String(depth + 1);
+
+  const expanded = isWorkspaceCodexFolderExpanded(node.path);
+  toggleButton.classList.toggle("is-expanded", expanded);
+  toggleButton.setAttribute("aria-expanded", String(expanded));
+
+  const prefix = document.createElement("span");
+  prefix.className = "workspace-codex-folder-prefix";
+  prefix.textContent = expanded ? "▾" : "▸";
+
+  const title = document.createElement("span");
+  title.className = "workspace-codex-folder-title mono";
+  title.textContent = node.name;
+
+  const countMeta = document.createElement("span");
+  countMeta.className = "workspace-codex-folder-meta";
+  countMeta.textContent = t("workspace.cardFileCount", { count: countWorkspaceCodexNodeFiles(node) });
+
+  toggleButton.append(prefix, title, countMeta);
+  entry.appendChild(toggleButton);
+
+  const children = document.createElement("ul");
+  children.className = "workspace-codex-tree-children";
+  children.hidden = !expanded;
+
+  for (const folder of node.folders) {
+    appendWorkspaceCodexFolderNode(children, folder, depth + 1);
+  }
+  for (const file of node.files) {
+    const fileEntry = document.createElement("li");
+    fileEntry.className = "workspace-codex-tree-node workspace-codex-tree-file";
+
+    const fileButton = document.createElement("button");
+    fileButton.type = "button";
+    fileButton.className = "workspace-codex-file-open";
+    fileButton.dataset.workspaceOpen = file.path;
+    if (file.path === state.activeWorkspacePath) {
+      fileButton.classList.add("is-selected");
+    }
+    const fileName = file.path.split("/").pop() ?? file.path;
+    fileButton.textContent = fileName;
+    fileButton.title = file.path;
+    fileEntry.appendChild(fileButton);
+    children.appendChild(fileEntry);
+  }
+
+  if (children.childElementCount > 0) {
+    entry.appendChild(children);
+  }
+  targetBody.appendChild(entry);
+}
+
+function countWorkspaceCodexNodeFiles(node: WorkspaceCodexTreeNode): number {
+  let count = node.files.length;
+  for (const folder of node.folders) {
+    count += countWorkspaceCodexNodeFiles(folder);
+  }
+  return count;
+}
+
+function isWorkspaceCodexFolderExpanded(path: string): boolean {
+  return state.workspaceCodexExpandedFolders.has(path);
+}
+
+function toggleWorkspaceCodexFolder(path: string): void {
+  if (state.workspaceCodexExpandedFolders.has(path)) {
+    state.workspaceCodexExpandedFolders.delete(path);
+  } else {
+    state.workspaceCodexExpandedFolders.add(path);
+  }
+  renderWorkspaceFiles();
+}
+
+function pruneWorkspaceCodexExpandedFolders(files: WorkspaceFileInfo[]): void {
+  const validPaths = new Set<string>();
+  const topLevelPaths = new Set<string>();
+  for (const file of files) {
+    if (!isWorkspaceCodexFile(file)) {
+      continue;
+    }
+    const normalizedPath = normalizeWorkspaceInputPath(file.path);
+    const relativePath = normalizedPath.slice(WORKSPACE_CODEX_PREFIX.length);
+    const parts = relativePath.split("/").filter((part) => part !== "");
+    let folderPath = "";
+    for (let index = 0; index < parts.length - 1; index += 1) {
+      folderPath = folderPath === "" ? parts[index] : `${folderPath}/${parts[index]}`;
+      if (index === 0) {
+        topLevelPaths.add(folderPath);
+      }
+      validPaths.add(folderPath);
+    }
+  }
+  for (const path of Array.from(state.workspaceCodexExpandedFolders)) {
+    if (!validPaths.has(path)) {
+      state.workspaceCodexExpandedFolders.delete(path);
+    }
+  }
+  if (state.workspaceCodexExpandedFolders.size === 0) {
+    for (const topPath of topLevelPaths) {
+      state.workspaceCodexExpandedFolders.add(topPath);
+    }
+  }
 }
 
 function renderWorkspaceFileRows(
@@ -4800,14 +5292,24 @@ function resolveWorkspaceFileSummary(file: WorkspaceFileInfo): string {
   if (file.kind === "skill") {
     return t("workspace.briefSkill");
   }
+  if (path.startsWith(WORKSPACE_CODEX_PREFIX)) {
+    return t("workspace.briefCodex");
+  }
   if (path.startsWith("docs/ai/") || path.startsWith("prompts/") || path.startsWith("prompt/")) {
     return t("workspace.briefAITools");
   }
   return t("workspace.briefGeneric");
 }
 
+function isWorkspaceCodexFile(file: WorkspaceFileInfo): boolean {
+  return normalizeWorkspacePathKey(file.path).startsWith(WORKSPACE_CODEX_PREFIX);
+}
+
 function isWorkspacePromptFile(file: WorkspaceFileInfo): boolean {
-  const path = file.path.trim().toLowerCase();
+  const path = normalizeWorkspacePathKey(file.path);
+  if (path.startsWith(WORKSPACE_CODEX_PREFIX)) {
+    return false;
+  }
   if (file.kind === "skill") {
     return true;
   }
@@ -5827,15 +6329,7 @@ function normalizeModelSlot(raw?: ModelSlotConfig): ModelSlotConfig {
 }
 
 function formatModelEntry(model: ModelInfo): string {
-  const parts = [model.id];
-  if (model.alias_of && model.alias_of.trim() !== "") {
-    parts.push(`->${model.alias_of}`);
-  }
-  const caps = formatCapabilities(model.capabilities);
-  if (caps !== "") {
-    parts.push(`[${caps}]`);
-  }
-  return parts.join(" ");
+  return model.id.trim() || (model.name ?? "").trim();
 }
 
 function formatCapabilities(capabilities?: ModelCapabilities): string {
