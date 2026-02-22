@@ -164,8 +164,31 @@ func (s *Server) processAgentWithBody(w http.ResponseWriter, r *http.Request, bo
 		return
 	}
 
-	systemLayers, err := s.buildSystemLayers()
+	requestPromptMode, hasRequestPromptMode, err := parsePromptModeFromBizParams(req.BizParams)
 	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_request", err.Error(), nil)
+		return
+	}
+	effectivePromptMode := requestPromptMode
+	if !hasRequestPromptMode {
+		effectivePromptMode = promptModeDefault
+		s.store.Read(func(state *repo.State) {
+			for _, chat := range state.Chats {
+				if chat.SessionID != req.SessionID || chat.UserID != req.UserID || chat.Channel != req.Channel {
+					continue
+				}
+				effectivePromptMode = resolvePromptModeFromChatMeta(chat.Meta)
+				return
+			}
+		})
+	}
+
+	systemLayers, err := s.buildSystemLayersForMode(effectivePromptMode)
+	if err != nil {
+		if effectivePromptMode == promptModeCodex {
+			writeErr(w, http.StatusInternalServerError, "codex_prompt_unavailable", "codex prompt is unavailable", nil)
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, "ai_tool_guide_unavailable", "ai tools guide is unavailable", nil)
 		return
 	}
@@ -189,6 +212,14 @@ func (s *Server) processAgentWithBody(w http.ResponseWriter, r *http.Request, bo
 				ID: chatID, Name: "New Chat", SessionID: req.SessionID, UserID: req.UserID, Channel: req.Channel,
 				Meta: map[string]interface{}{}, CreatedAt: now, UpdatedAt: now,
 			}
+		}
+		if hasRequestPromptMode {
+			chat := state.Chats[chatID]
+			if chat.Meta == nil {
+				chat.Meta = map[string]interface{}{}
+			}
+			chat.Meta[chatMetaPromptModeKey] = requestPromptMode
+			state.Chats[chatID] = chat
 		}
 		if len(cronChatMeta) > 0 {
 			chat := state.Chats[chatID]
@@ -691,6 +722,55 @@ func cronChatMetaFromBizParams(bizParams map[string]interface{}) map[string]inte
 		meta["cron_job_name"] = jobName
 	}
 	return meta
+}
+
+func parsePromptModeFromBizParams(bizParams map[string]interface{}) (string, bool, error) {
+	if len(bizParams) == 0 {
+		return promptModeDefault, false, nil
+	}
+	rawPromptMode, hasPromptMode := bizParams[chatMetaPromptModeKey]
+	if !hasPromptMode {
+		return promptModeDefault, false, nil
+	}
+	value, ok := rawPromptMode.(string)
+	if !ok {
+		return "", true, errors.New("invalid prompt_mode")
+	}
+	mode, ok := normalizePromptMode(value)
+	if !ok {
+		return "", true, errors.New("invalid prompt_mode")
+	}
+	return mode, true, nil
+}
+
+func resolvePromptModeFromChatMeta(meta map[string]interface{}) string {
+	if len(meta) == 0 {
+		return promptModeDefault
+	}
+	rawMode, ok := meta[chatMetaPromptModeKey]
+	if !ok || rawMode == nil {
+		return promptModeDefault
+	}
+	value, ok := rawMode.(string)
+	if !ok {
+		return promptModeDefault
+	}
+	mode, ok := normalizePromptMode(value)
+	if !ok {
+		return promptModeDefault
+	}
+	return mode
+}
+
+func normalizePromptMode(raw string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case promptModeDefault:
+		return promptModeDefault, true
+	case promptModeCodex:
+		return promptModeCodex, true
+	default:
+		return "", false
+	}
 }
 
 func qqMap(raw interface{}) (map[string]interface{}, bool) {

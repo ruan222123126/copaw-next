@@ -180,3 +180,31 @@ Sample response:
   - `features.prompt_templates` <- `NEXTAI_ENABLE_PROMPT_TEMPLATES`
   - `features.prompt_context_introspect` <- `NEXTAI_ENABLE_PROMPT_CONTEXT_INTROSPECT`
 - Web 侧特性开关优先级：`query > localStorage > runtime-config > false`。
+
+## Prompt Mode（会话级，2026-02）
+- `POST /agent/process` 支持可选字段：`biz_params.prompt_mode`。
+- 枚举值：`default` | `codex`。
+- 非法值（包含非字符串或不在枚举内）返回：
+  - `400 invalid_request`
+  - `message=invalid prompt_mode`
+
+### 会话持久化规则
+- 会话元数据新增：`chat.meta.prompt_mode`。
+- 若请求显式携带 `biz_params.prompt_mode`，Gateway 会写回并持久化到该会话 `meta.prompt_mode`。
+- 若请求未携带 `biz_params.prompt_mode`，执行时按以下优先级解析有效模式：
+  1. 请求显式值
+  2. 会话 `meta.prompt_mode`
+  3. `default`
+
+### 系统层注入规则
+- `prompt_mode=default`：
+  - 维持原行为（`AGENTS + ai-tools` 分层注入）。
+- `prompt_mode=codex`：
+  - 仅注入 `prompts/codex/codex-rs/core/prompt.md`。
+  - 不再叠加默认 `AGENTS/ai-tools` 系统层。
+
+### 错误语义
+- `prompt_mode=codex` 且 codex base 文件缺失或为空时返回：
+  - `500 codex_prompt_unavailable`
+  - `message=codex prompt is unavailable`
+- `prompt_mode=default` 继续沿用既有系统层错误语义（如 `ai_tool_guide_unavailable`）。

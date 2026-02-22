@@ -1330,6 +1330,28 @@ func prependSystemLayers(input []domain.AgentInputMessage, layers []systemPrompt
 }
 
 func (s *Server) buildSystemLayers() ([]systemPromptLayer, error) {
+	return s.buildSystemLayersForMode(promptModeDefault)
+}
+
+func (s *Server) buildSystemLayersForMode(mode string) ([]systemPromptLayer, error) {
+	normalizedMode, ok := normalizePromptMode(mode)
+	if !ok {
+		return nil, fmt.Errorf("invalid prompt mode: %s", mode)
+	}
+	if normalizedMode == promptModeCodex {
+		source, content, err := loadRequiredSystemLayer([]string{codexBasePromptRelativePath})
+		if err != nil {
+			return nil, err
+		}
+		return []systemPromptLayer{
+			{
+				Name:    "codex_base_system",
+				Role:    "system",
+				Source:  source,
+				Content: systempromptservice.FormatLayerSourceContent(source, content),
+			},
+		}, nil
+	}
 	return s.getSystemPromptService().BuildLayers(
 		[]string{aiToolsGuideRelativePath},
 		[]string{aiToolsGuideLegacyRelativePath, aiToolsGuideLegacyV0RelativePath},
